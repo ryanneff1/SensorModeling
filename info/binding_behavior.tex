@@ -1,0 +1,762 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{bm}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\title{Target--Receptor Binding and Unbinding in the Lattice Monte Carlo Biosensor Model}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+The lattice Monte Carlo biosensor model represents soluble target molecules as diffusing particles and surface receptors as fixed binding sites. Target diffusion is modeled on a three-dimensional cubic lattice, while receptors are positioned on the sensing surface at (z=0).
+
+A target molecule may bind when it occupies the solution voxel immediately above a receptor. Binding and unbinding are treated as stochastic Poisson processes. The probabilities applied during each simulation timestep are derived from the macroscopic association and dissociation rate constants,
+
+\begin{equation}
+k_{\mathrm{on}}
+\quad \text{and} \quad
+k_{\mathrm{off}},
+\end{equation}
+
+rather than selected empirically.
+
+The principal input units are
+
+\begin{align}
+k_{\mathrm{on}} &: \si{\per\molar\per\second},\
+k_{\mathrm{off}} &: \si{\per\second},\
+D &: \si{\meter\squared\per\second},\
+a &: \si{\meter},\
+\Delta t &: \si{\second}.
+\end{align}
+
+The equilibrium dissociation constant is
+
+\begin{equation}
+K_D
+=
+\frac{k_{\mathrm{off}}}{k_{\mathrm{on}}},
+\end{equation}
+
+with units of molar concentration.
+
+\section{Spatial Representation of Binding}
+
+Receptors are fixed on the sensing surface at (z=0). A free target molecule diffuses in the solution region, with accessible vertical lattice layers beginning at (z=1).
+
+A target molecule is eligible to bind a receptor when all of the following conditions are satisfied:
+
+\begin{enumerate}
+\item The target is active and unbound.
+\item The target is located in the first solution layer, (z=1).
+\item The target has the same lateral lattice coordinates ((x,y)) as the receptor.
+\item The receptor is currently unoccupied.
+\end{enumerate}
+
+When binding occurs, the target is assigned to the receptor and its position is stored at the surface location
+
+\begin{equation}
+(x,y,z)=(x_R,y_R,0).
+\end{equation}
+
+Each target can bind no more than one receptor, and each receptor can bind no more than one target at a time.
+
+The binding rule therefore defines a local reaction region rather than allowing a target to react with every receptor in the simulation volume.
+
+\section{Reaction Volume}
+
+The local reaction volume is defined using a user-specified number of lattice voxels,
+
+\begin{equation}
+n_{\mathrm{rxn}},
+\end{equation}
+
+and the lattice spacing (a). The reaction volume in cubic meters is
+
+\begin{equation}
+V_{\mathrm{rxn,m^3}}
+=
+n_{\mathrm{rxn}}a^3.
+\end{equation}
+
+Because the association rate constant is expressed in
+(\si{\per\molar\per\second}), the volume must be converted to liters:
+
+\begin{equation}
+V_{\mathrm{rxn,L}}
+=
+1000,n_{\mathrm{rxn}}a^3.
+\end{equation}
+
+Here, the factor of (1000) follows from
+
+\begin{equation}
+1~\si{\meter\cubed}
+=
+1000~\si{\liter}.
+\end{equation}
+
+The default reaction region contains one lattice voxel:
+
+\begin{equation}
+n_{\mathrm{rxn}}=1.
+\end{equation}
+
+Thus, by default,
+
+\begin{equation}
+V_{\mathrm{rxn,L}}
+=
+1000a^3.
+\end{equation}
+
+\section{Concentration Represented by One Target Molecule}
+
+A macroscopic bimolecular association rate is conventionally written as
+
+\begin{equation}
+\text{association rate}
+=
+k_{\mathrm{on}}[L][R].
+\end{equation}
+
+In the particle simulation, the local reaction region contains a discrete number of target molecules rather than a continuous concentration. One target molecule in a reaction volume (V_{\mathrm{rxn,L}}) corresponds to an effective molar concentration
+
+\begin{equation}
+C_1
+=
+\frac{1}{N_A V_{\mathrm{rxn,L}}},
+\end{equation}
+
+where (N_A) is Avogadro's constant,
+
+\begin{equation}
+N_A
+=
+6.02214076\times10^{23}
+~\si{\per\mole}.
+\end{equation}
+
+The units are
+
+\begin{equation}
+\frac{1}
+{
+(\si{\per\mole})(\si{\liter})
+}
+=
+\si{\mole\per\liter}
+=
+\si{\molar}.
+\end{equation}
+
+Therefore, a single target molecule occupying the reaction volume produces the local pseudo-first-order association rate
+
+\begin{equation}
+\lambda_{\mathrm{on},1}
+=
+k_{\mathrm{on}}C_1
+=
+\frac{k_{\mathrm{on}}}
+{N_A V_{\mathrm{rxn,L}}}.
+\end{equation}
+
+The quantity (\lambda_{\mathrm{on},1}) has units of inverse time.
+
+\section{Binding Probability for One Available Receptor}
+
+Association is modeled as a Poisson process with constant hazard
+
+\begin{equation}
+\lambda_{\mathrm{on},1}
+=
+\frac{k_{\mathrm{on}}}
+{N_A V_{\mathrm{rxn,L}}}.
+\end{equation}
+
+For a Poisson process with hazard (\lambda), the probability that at least one event occurs during a timestep (\Delta t) is
+
+\begin{equation}
+p
+=
+1-\exp(-\lambda\Delta t).
+\end{equation}
+
+The binding probability for one target and one available receptor is therefore
+
+\begin{equation}
+\boxed{
+p_{\mathrm{bind},1}
+=
+1-
+\exp\left[
+-
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+}
+\right]
+}.
+\end{equation}
+
+Defining the dimensionless association exponent
+
+\begin{equation}
+\Lambda_{\mathrm{on}}
+=
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+},
+\end{equation}
+
+the probability can be written as
+
+\begin{equation}
+p_{\mathrm{bind},1}
+=
+1-\exp(-\Lambda_{\mathrm{on}}).
+\end{equation}
+
+For sufficiently small (\Lambda_{\mathrm{on}}),
+
+\begin{equation}
+p_{\mathrm{bind},1}
+\approx
+\Lambda_{\mathrm{on}}
+=
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+}.
+\end{equation}
+
+The exponential form is retained in the simulation because it remains bounded between zero and one even when the timestep or association rate is relatively large.
+
+\section{Multiple Receptors at One Lattice Site}
+
+By default, the model permits no more than one receptor per surface lattice site. An optional model configuration allows multiple receptors to occupy the same site.
+
+Suppose a target is adjacent to a site containing (m) currently unbound receptors. Each receptor contributes the same association hazard,
+
+\begin{equation}
+\lambda_{\mathrm{on},1}
+=
+\frac{k_{\mathrm{on}}}
+{N_A V_{\mathrm{rxn,L}}}.
+\end{equation}
+
+Assuming independent competing association processes, the total hazard is
+
+\begin{equation}
+\lambda_{\mathrm{on},m}
+=
+m\lambda_{\mathrm{on},1}.
+\end{equation}
+
+The probability that the target binds at least one of the (m) receptors during the timestep is
+
+\begin{equation}
+\boxed{
+p_{\mathrm{bind},m}
+=
+1-
+\exp\left[
+-
+m
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+}
+\right]
+}.
+\end{equation}
+
+If a binding event occurs, one of the (m) available receptors is selected uniformly:
+
+\begin{equation}
+P(\text{select receptor }j\mid\text{binding})
+=
+\frac{1}{m}.
+\end{equation}
+
+This is consistent with the assumption that all receptors at that site have identical association kinetics.
+
+\section{Competition Between Targets}
+
+Multiple free targets may occupy the same solution voxel in the current model. When several targets are adjacent to the same receptor, they compete for that receptor.
+
+Eligible target identifiers are randomly shuffled before binding is evaluated. Targets are then processed sequentially. Once one target binds the receptor, subsequent targets at that site find the receptor occupied and cannot bind it during that timestep.
+
+This procedure enforces receptor exclusivity while reducing systematic bias associated with the numerical ordering of target identifiers.
+
+The sequential algorithm is an approximation to simultaneous competition during a finite timestep. It is most accurate when individual reaction probabilities are sufficiently small that multiple competing reaction attempts during one timestep are uncommon.
+
+\section{Unbinding Probability}
+
+Dissociation is modeled as a first-order Poisson process. For an occupied receptor, the dissociation hazard is
+
+\begin{equation}
+\lambda_{\mathrm{off}}
+=
+k_{\mathrm{off}}.
+\end{equation}
+
+The probability that the receptor--target complex dissociates during one timestep is
+
+\begin{equation}
+\boxed{
+p_{\mathrm{off}}
+=
+1-\exp(-k_{\mathrm{off}}\Delta t)
+}.
+\end{equation}
+
+For sufficiently small (k_{\mathrm{off}}\Delta t),
+
+\begin{equation}
+p_{\mathrm{off}}
+\approx
+k_{\mathrm{off}}\Delta t.
+\end{equation}
+
+The mean lifetime of a continuously observed receptor--target complex is
+
+\begin{equation}
+\tau_{\mathrm{bound}}
+=
+\frac{1}{k_{\mathrm{off}}}.
+\end{equation}
+
+The survival probability for a complex that formed at time zero is
+
+\begin{equation}
+S_{\mathrm{bound}}(t)
+=
+\exp(-k_{\mathrm{off}}t).
+\end{equation}
+
+Thus, the discrete unbinding probability is the exact finite-timestep probability corresponding to the continuous exponential lifetime distribution.
+
+\section{Position of a Target After Dissociation}
+
+When a receptor--target complex dissociates, the target is returned to the solution voxel directly above the receptor:
+
+\begin{equation}
+(x,y,z)
+=
+(x_R,y_R,1).
+\end{equation}
+
+The receptor and target are both marked as unbound:
+
+\begin{align}
+\text{receptor occupancy} &\rightarrow \text{empty},\
+\text{target receptor assignment} &\rightarrow \text{none}.
+\end{align}
+
+Placing the dissociated target in the first solution layer preserves its proximity to the receptor and allows the model to represent rapid local rebinding.
+
+\section{Rebinding Behavior}
+
+Following dissociation, the target is placed under a rebinding watch. The model stores the identity of the receptor from which the target most recently dissociated.
+
+If the target binds another receptor before escaping the near-surface region, the event is classified as a rebinding event.
+
+A rebinding event is classified as a self-rebinding when the target returns to the same receptor:
+
+\begin{equation}
+R_{\mathrm{new}}
+=
+R_{\mathrm{previous}}.
+\end{equation}
+
+A rebinding event is classified as a cross-rebinding when the target binds a different receptor:
+
+\begin{equation}
+R_{\mathrm{new}}
+\neq
+R_{\mathrm{previous}}.
+\end{equation}
+
+The model therefore records
+
+\begin{align}
+N_{\mathrm{rebind}}
+&=
+N_{\mathrm{self}}
++
+N_{\mathrm{cross}},\
+N_{\mathrm{self}}
+&=
+\text{number of returns to the original receptor},\
+N_{\mathrm{cross}}
+&=
+\text{number of bindings to a different receptor}.
+\end{align}
+
+The rebinding watch is terminated if the target reaches or exceeds a specified escape height,
+
+\begin{equation}
+z
+\geq
+z_{\mathrm{escape}},
+\end{equation}
+
+or if the target leaves the simulation volume through an open boundary.
+
+This operational definition distinguishes local surface rebinding from a later binding event occurring after the target has returned to the bulk solution.
+
+\section{Event Ordering Within a Timestep}
+
+The principal operations during one simulation timestep occur in the following order:
+
+\begin{enumerate}
+\item Free targets diffuse.
+\item Targets crossing open boundaries are removed.
+\item Rebinding watches are terminated for targets that reach the escape height.
+\item Eligible free targets attempt to bind receptors.
+\item Receptors that were occupied at the start of the timestep attempt to dissociate.
+\item New targets are injected from the bulk boundaries.
+\item Simulation time and event counters are advanced.
+\end{enumerate}
+
+The set of receptors eligible for unbinding is recorded at the beginning of the timestep. Consequently, a complex newly formed during the current binding stage does not dissociate during the same timestep.
+
+This ordering avoids an immediate bind--unbind sequence within one discrete update. It also means that newly formed complexes remain bound for at least one timestep.
+
+For sufficiently small (\Delta t), the difference between alternative event orderings becomes small. At larger timesteps, ordering can influence the measured kinetics and should be considered part of the model definition.
+
+\section{Well-Mixed Binding Theory}
+
+For comparison, consider a well-mixed system with constant free target concentration (C). Let
+
+\begin{equation}
+\theta(t)
+\end{equation}
+
+be the fraction of receptors occupied at time (t).
+
+The conventional Langmuir kinetic equation is
+
+\begin{equation}
+\frac{d\theta}{dt}
+=
+k_{\mathrm{on}}C(1-\theta)
+-
+k_{\mathrm{off}}\theta.
+\end{equation}
+
+The first term describes association to unoccupied receptors, and the second term describes dissociation from occupied receptors.
+
+Defining
+
+\begin{equation}
+k_{\mathrm{obs}}
+=
+k_{\mathrm{on}}C
++
+k_{\mathrm{off}},
+\end{equation}
+
+the equilibrium occupancy is
+
+\begin{equation}
+\theta_{\mathrm{eq}}
+=
+\frac{k_{\mathrm{on}}C}
+{k_{\mathrm{on}}C+k_{\mathrm{off}}}.
+\end{equation}
+
+Using
+
+\begin{equation}
+K_D
+=
+\frac{k_{\mathrm{off}}}{k_{\mathrm{on}}},
+\end{equation}
+
+this becomes
+
+\begin{equation}
+\boxed{
+\theta_{\mathrm{eq}}
+=
+\frac{C}{C+K_D}
+}.
+\end{equation}
+
+For an initial occupancy (\theta_0), the transient solution is
+
+\begin{equation}
+\boxed{
+\theta(t)
+=
+\theta_{\mathrm{eq}}
++
+\left(
+\theta_0-\theta_{\mathrm{eq}}
+\right)
+\exp(-k_{\mathrm{obs}}t)
+}.
+\end{equation}
+
+This well-mixed curve provides a useful reference for interpreting the Monte Carlo simulation.
+
+\section{Why the Lattice Model May Deviate from Langmuir Theory}
+
+The well-mixed Langmuir equation assumes that every receptor experiences the same constant target concentration at all times. The lattice simulation explicitly resolves transport and local particle history, so this assumption may not hold.
+
+Potential sources of deviation include the following.
+
+\subsection{Diffusion-Limited Association}
+
+Targets must diffuse to the sensing surface before binding. If transport is slow relative to the intrinsic association reaction, the near-surface target concentration may be lower than the bulk concentration.
+
+The observed association rate may then be limited by diffusion rather than by (k_{\mathrm{on}}) alone.
+
+\subsection{Local Target Depletion}
+
+Binding removes free targets from the solution immediately adjacent to the sensor. At sufficiently high receptor density or low target concentration, this can create a local depletion region.
+
+\subsection{Rebinding}
+
+A dissociated target is initially positioned close to the surface and may rapidly return to the same receptor or bind a nearby receptor.
+
+Rebinding can increase apparent surface residence time and reduce the apparent rate at which targets are permanently lost from the receptor layer.
+
+\subsection{Finite Receptor Density}
+
+The spatial distance between receptors affects the probability that a dissociated target encounters either its original receptor or a neighboring receptor.
+
+Receptor density therefore influences both association and cross-rebinding behavior.
+
+\subsection{Finite Geometry and Boundary Conditions}
+
+The model contains a reflecting sensing surface and open bulk boundaries. The finite size of the simulated domain and the bulk reinjection procedure may influence concentration fluctuations and transport behavior.
+
+\subsection{Discrete Spatial Resolution}
+
+Binding is permitted only when a target occupies a defined reaction voxel. The lattice spacing and reaction-volume definition therefore affect the mapping between the macroscopic association constant and the microscopic binding probability.
+
+\section{Dependence on Lattice Spacing}
+
+For one reaction voxel,
+
+\begin{equation}
+V_{\mathrm{rxn,L}}
+=
+1000a^3.
+\end{equation}
+
+The association exponent is then
+
+\begin{equation}
+\Lambda_{\mathrm{on}}
+=
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+1000N_Aa^3
+}.
+\end{equation}
+
+For the diffusion algorithm, the timestep is commonly selected proportional to
+
+\begin{equation}
+\Delta t
+\propto
+\frac{a^2}{D}.
+\end{equation}
+
+Consequently,
+
+\begin{equation}
+\Lambda_{\mathrm{on}}
+\propto
+\frac{k_{\mathrm{on}}}{N_A D a}.
+\end{equation}
+
+Thus, changing the lattice spacing while retaining a one-voxel reaction region changes the microscopic binding probability.
+
+This dependence is important when interpreting lattice-refinement studies. A smaller lattice spacing does not automatically produce identical reaction behavior unless the reaction model is appropriately rescaled or calibrated.
+
+The current formulation should therefore be viewed as a coarse-grained reaction model in which the lattice spacing, reaction volume, timestep, and association probability jointly define the microscopic representation of (k_{\mathrm{on}}).
+
+\section{Dimensionless Reaction Parameters}
+
+Two useful dimensionless quantities characterize reaction probabilities during one timestep.
+
+The association exponent for one receptor is
+
+\begin{equation}
+\Lambda_{\mathrm{on}}
+=
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+}.
+\end{equation}
+
+The dissociation exponent is
+
+\begin{equation}
+\Lambda_{\mathrm{off}}
+=
+k_{\mathrm{off}}\Delta t.
+\end{equation}
+
+The corresponding probabilities are
+
+\begin{align}
+p_{\mathrm{bind},1}
+&=
+1-\exp(-\Lambda_{\mathrm{on}}),\
+p_{\mathrm{off}}
+&=
+1-\exp(-\Lambda_{\mathrm{off}}).
+\end{align}
+
+When both dimensionless exponents are much less than one,
+
+\begin{align}
+p_{\mathrm{bind},1}
+&\approx
+\Lambda_{\mathrm{on}},\
+p_{\mathrm{off}}
+&\approx
+\Lambda_{\mathrm{off}}.
+\end{align}
+
+This low-probability regime minimizes sensitivity to discrete event ordering and reduces the probability of unresolved multiple reaction events within a single timestep.
+
+\section{Summary of Implemented Probabilities}
+
+The principal stochastic reaction probabilities are summarized in Table~\ref{tab:probabilities}.
+
+\begin{table}[ht]
+\centering
+\caption{Reaction probabilities used by the lattice Monte Carlo model.}
+\label{tab:probabilities}
+\begin{tabular}{lll}
+\toprule
+Process & Hazard & Timestep probability \
+\midrule
+One target, one receptor
+&
+(\displaystyle
+\frac{k_{\mathrm{on}}}
+{N_AV_{\mathrm{rxn,L}}}
+)
+&
+(\displaystyle
+1-\exp\left[
+-\frac{k_{\mathrm{on}}\Delta t}
+{N_AV_{\mathrm{rxn,L}}}
+\right]
+)
+[1.2em]
+
+```
+    One target, \(m\) receptors
+    &
+    \(\displaystyle
+    \frac{mk_{\mathrm{on}}}
+    {N_AV_{\mathrm{rxn,L}}}
+    \)
+    &
+    \(\displaystyle
+    1-\exp\left[
+    -\frac{mk_{\mathrm{on}}\Delta t}
+    {N_AV_{\mathrm{rxn,L}}}
+    \right]
+    \)
+    \\[1.2em]
+
+    Dissociation
+    &
+    \(k_{\mathrm{off}}\)
+    &
+    \(\displaystyle
+    1-\exp(-k_{\mathrm{off}}\Delta t)
+    \)
+    \\
+    \bottomrule
+\end{tabular}
+```
+
+\end{table}
+
+\section{Model Assumptions}
+
+The present binding implementation makes the following principal assumptions:
+
+\begin{enumerate}
+\item All receptors share the same (k_{\mathrm{on}}) and (k_{\mathrm{off}}).
+\item Targets and receptors form one-to-one complexes.
+\item Receptors are immobile.
+\item Binding occurs only within the designated reaction voxel.
+\item The association hazard is constant while a target occupies that voxel.
+\item Dissociation follows an exponential waiting-time distribution.
+\item Receptors do not exhibit cooperativity or allostery.
+\item Targets do not sterically exclude one another from solution voxels.
+\item Bound targets do not diffuse laterally.
+\item The free target does not retain orientation or conformational information.
+\item Rebinding is defined operationally using an escape-height threshold.
+\end{enumerate}
+
+These assumptions are appropriate for a coarse-grained model intended to investigate the interaction between diffusion, receptor density, association, dissociation, and rebinding. More detailed molecular models would be required to represent orientational constraints, receptor conformational changes, hydrodynamic interactions, electrostatic forces, or molecular crowding.
+
+\section{Conclusion}
+
+The receptor reaction probabilities in the lattice Monte Carlo model are finite-timestep representations of continuous Poisson association and dissociation processes.
+
+For one target molecule and one available receptor in a reaction volume (V_{\mathrm{rxn,L}}), the association probability is
+
+\begin{equation}
+\boxed{
+p_{\mathrm{bind},1}
+=
+1-
+\exp\left[
+-
+\frac{
+k_{\mathrm{on}}\Delta t
+}{
+N_A V_{\mathrm{rxn,L}}
+}
+\right]
+}.
+\end{equation}
+
+For an occupied receptor, the dissociation probability is
+
+\begin{equation}
+\boxed{
+p_{\mathrm{off}}
+=
+1-\exp(-k_{\mathrm{off}}\Delta t)
+}.
+\end{equation}
+
+These expressions preserve the exponential waiting-time statistics associated with the macroscopic kinetic constants. The spatial lattice then introduces transport limitations, local depletion, receptor competition, and target rebinding that are absent from the conventional well-mixed Langmuir model.
+
+As a result, the simulation can reproduce well-mixed binding kinetics under transport-independent conditions while also describing deviations caused by diffusion and spatial organization at the sensor surface.
+
+\end{document}
