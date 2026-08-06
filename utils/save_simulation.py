@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 
 try:
@@ -116,9 +117,9 @@ def _save_dataframe(
     """
     Save a DataFrame as Parquet or compressed CSV.
 
-    Parquet is preferred for speed, size, and dtype preservation. If the
-    required Parquet dependency is unavailable, the function automatically
-    falls back to gzip-compressed CSV.
+    For Parquet, construct an ordinary PyArrow table directly instead of
+    calling DataFrame.to_parquet(). This avoids pandas extension-type
+    registration and produces portable primitive Arrow columns.
     """
     table_format = table_format.lower()
 
@@ -127,24 +128,129 @@ def _save_dataframe(
             "table_format must be 'parquet' or 'csv'."
         )
 
+    if not isinstance(dataframe, pd.DataFrame):
+        raise TypeError(
+            "dataframe must be a pandas DataFrame."
+        )
+
+    if not dataframe.columns.is_unique:
+        duplicates = dataframe.columns[
+            dataframe.columns.duplicated()
+        ].tolist()
+
+        raise ValueError(
+            f"Duplicate DataFrame columns are not supported: {duplicates}"
+        )
+
     if table_format == "parquet":
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         final_path = output_directory / f"{stem}.parquet"
         temporary_path = output_directory / f"{stem}.parquet.tmp"
 
-        try:
-            dataframe.to_parquet(
-                temporary_path,
-                index=False,
-            )
-            os.replace(temporary_path, final_path)
-            return final_path
+        # Convert each Series to ordinary Python/NumPy values rather than
+        # retaining pandas Arrow extension dtypes.
+        arrow_columns = {}
 
-        except (ImportError, ModuleNotFoundError):
+        for column_name in dataframe.columns:
+            series = dataframe[column_name]
+
+            if not isinstance(column_name, str):
+                column_name = str(column_name)
+
+            # Handle common simulation-table dtypes explicitly.
+            if pd.api.types.is_bool_dtype(series.dtype):
+                arrow_columns[column_name] = pa.array(
+                    series.astype("boolean").tolist(),
+                    type=pa.bool_(),
+                    from_pandas=True,
+                )
+
+            elif pd.api.types.is_integer_dtype(series.dtype):
+                # Let Arrow preserve nullability when pandas nullable integer
+                # dtypes are used.
+                arrow_columns[column_name] = pa.array(
+                    series.tolist(),
+                    from_pandas=True,
+                )
+
+            elif pd.api.types.is_float_dtype(series.dtype):
+                arrow_columns[column_name] = pa.array(
+                    series.to_numpy(dtype=np.float64, na_value=np.nan),
+                    type=pa.float64(),
+                    from_pandas=True,
+                )
+
+            elif pd.api.types.is_datetime64_any_dtype(series.dtype):
+                arrow_columns[column_name] = pa.array(
+                    series.tolist(),
+                    from_pandas=True,
+                )
+
+            elif (
+                pd.api.types.is_string_dtype(series.dtype)
+                or pd.api.types.is_object_dtype(series.dtype)
+                or isinstance(series.dtype, pd.CategoricalDtype)
+            ):
+                # Simulation object columns should normally contain strings,
+                # None, or other scalar values. Converting to object removes
+                # pandas Arrow-backed string extension metadata.
+                values = series.astype(object).where(
+                    pd.notna(series),
+                    None,
+                ).tolist()
+
+                try:
+                    arrow_columns[column_name] = pa.array(
+                        values,
+                        from_pandas=True,
+                    )
+                except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
+                    value_types = sorted({
+                        type(value).__name__
+                        for value in values
+                        if value is not None
+                    })
+
+                    raise TypeError(
+                        f"Column {column_name!r} cannot be represented as a "
+                        "single Parquet column. Observed Python value types: "
+                        f"{value_types}."
+                    ) from exc
+
+            else:
+                arrow_columns[column_name] = pa.array(
+                    series.astype(object).where(
+                        pd.notna(series),
+                        None,
+                    ).tolist(),
+                    from_pandas=True,
+                )
+
+        table = pa.table(arrow_columns)
+
+        try:
+            pq.write_table(
+                table,
+                temporary_path,
+                compression="zstd",
+                use_dictionary=True,
+                write_statistics=True,
+            )
+
+            os.replace(
+                temporary_path,
+                final_path,
+            )
+
+        except Exception:
             if temporary_path.exists():
                 temporary_path.unlink()
 
-            # Continue using compressed CSV.
-            table_format = "csv"
+            raise
+
+        return final_path
 
     final_path = output_directory / f"{stem}.csv.gz"
     temporary_path = output_directory / f"{stem}.csv.gz.tmp"
@@ -155,13 +261,27 @@ def _save_dataframe(
         compression="gzip",
     )
 
-    os.replace(temporary_path, final_path)
+    os.replace(
+        temporary_path,
+        final_path,
+    )
+
     return final_path
 
-
 def _load_dataframe(path: Path) -> pd.DataFrame:
+    path = Path(path)
+
     if path.suffix == ".parquet":
-        return pd.read_parquet(path)
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(
+            path,
+            arrow_extensions_enabled=False,
+        )
+
+        return table.to_pandas(
+            ignore_metadata=True,
+        )
 
     if path.name.endswith(".csv.gz"):
         return pd.read_csv(path)
