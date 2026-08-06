@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --account=b53010
-#SBATCH --partition=normal
+#SBATCH --partition=buyin
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
 #SBATCH --mem-per-cpu=4G
-#SBATCH --job-name=260806_soloNanopore_geometry_sweep_test
+#SBATCH --job-name=260806_nanopore_geometry_sweep_test
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
 
