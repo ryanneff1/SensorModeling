@@ -45,8 +45,6 @@ from utils.generate_geometries import (
 )
 
 PathLike = Union[str, Path]
-
-
 @dataclass
 class FreeDiffusionResult:
     """Results from the unbounded free-diffusion validation protocol."""
