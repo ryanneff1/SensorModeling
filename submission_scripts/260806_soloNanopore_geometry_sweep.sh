@@ -1,13 +1,15 @@
 #!/bin/bash
 #SBATCH --account=b53010
 #SBATCH --partition=buyin
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
 #SBATCH --mem-per-cpu=4G
-#SBATCH --job-name=260806_nanopore_geometry_sweep_test
+#SBATCH --job-name=260806_nanopore_geometry_sweep
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=ryan.neff@northwestern.edu
 
 set -euo pipefail
 
@@ -31,8 +33,8 @@ OUTPUT_ROOT="/home/rnt2664/results/260806_nanopore_geometry_sweep"
 DIAMETERS_M=(30e-9 35e-9 40e-9 50e-9 75e-9 100e-9)
 N_REPLICATES=5
 
-ASSOCIATION_S=1
-DISSOCIATION_S=1
+ASSOCIATION_S=600
+DISSOCIATION_S=600
 ASSOCIATION_CONCENTRATION_M=10e-9
 DISSOCIATION_CONCENTRATION_M=0
 
