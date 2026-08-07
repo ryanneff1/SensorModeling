@@ -80,7 +80,7 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument("--pore-depth-m", type=float, required=True)
-    parser.add_argument("--pitch-m", type=float, required=True)
+    # parser.add_argument("--pitch-m", type=float, required=True)
     parser.add_argument("--rim-z-m", type=float, required=True)
     parser.add_argument(
         "--layout",
@@ -122,7 +122,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
         "association duration": args.association_s,
         "dissociation duration": args.dissociation_s,
         "pore depth": args.pore_depth_m,
-        "pitch": args.pitch_m,
+        # "pitch": args.pitch_m,
         "rim height": args.rim_z_m,
         "record interval": args.record_every_s,
     }
@@ -187,7 +187,7 @@ def build_tasks(
                         float(args.dissociation_concentration_M)
                     ),
                     "pore_depth_m": float(args.pore_depth_m),
-                    "pitch_m": float(args.pitch_m),
+                    "pitch_m": diameter_m * 1.2, #float(args.pitch_m),
                     "rim_z_m": float(args.rim_z_m),
                     "layout": args.layout,
                     "edge_margin_m": (
@@ -205,7 +205,6 @@ def build_tasks(
             )
 
     return tasks
-
 
 def run_protocol_task(task: Dict[str, Any]) -> Dict[str, Any]:
     """Run and save one diameter/replicate association-dissociation task."""

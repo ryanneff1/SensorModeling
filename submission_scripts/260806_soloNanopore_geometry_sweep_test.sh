@@ -19,27 +19,28 @@ set -euo pipefail
 
 # Full path to the SensorModeling repository. The directory must contain the
 # protocol script and the utils package.
-PROJECT_DIR="/home/rnt2664/SensorModeling"
+PROJECT_DIR="/Users/rynon/Documents/GitHub/SensorModeling"
 
 # Full path to the Quest conda environment containing numpy, pandas, scipy,
 # pyarrow, tqdm, ipyparallel, and the other packages used by the model.
-CONDA_ENV="sensor-modeling-env"
+CONDA_ENV="abmenv"
 
-PYTHON_SCRIPT="${PROJECT_DIR}/nanopore_geometry_sweep.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/nanopore_geometry_sweep.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/soloNanopore_base_params.json"
-OUTPUT_ROOT="/home/rnt2664/results/260806_nanopore_geometry_sweep"
+OUTPUT_ROOT="//Users/rynon/Documents/GitHub/SensorModeling/results/260806_nanopore_geometry_sweep_test"
 
 # Protocol settings passed directly to the Python script.
 DIAMETERS_M=(30e-9 35e-9 40e-9 50e-9 70e-9 90e-9)
 N_REPLICATES=5
 
-ASSOCIATION_S=600
-DISSOCIATION_S=1200
+ASSOCIATION_S=0.01
+DISSOCIATION_S=0.01
 ASSOCIATION_CONCENTRATION_M=10e-9
 DISSOCIATION_CONCENTRATION_M=0
 
 PORE_DEPTH_M=250e-9
 RIM_Z_M=250e-9
+# PITCH_M=PORE_DEPTH_M * 1.2 # 20% larger than the pore depth to avoid overlap
 LAYOUT="square"
 
 RECORD_EVERY_S=0.05
@@ -55,17 +56,17 @@ OVERWRITE=True
 
 # Use one IPyParallel engine per allocated Slurm CPU. The Python script will
 # automatically reduce this value if there are fewer tasks than engines.
-N_WORKERS=16
+N_WORKERS=4
 
 # -----------------------------------------------------------------------------
 # Quest software environment
 # -----------------------------------------------------------------------------
 
-module purge
-module load anaconda3/2022.05
+# module purge
+# module load anaconda3/2022.05
 
 # Quest batch-job activation sequence for the conda module.
-conda activate "${CONDA_ENV}"
+# conda activate "${CONDA_ENV}"
 
 # Keep each IPyParallel engine single-threaded.
 export OMP_NUM_THREADS=1
@@ -73,7 +74,7 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-mkdir -p "${IPYTHONDIR}" "${OUTPUT_ROOT}"
+mkdir -p "${OUTPUT_ROOT}"
 
 cd "${PROJECT_DIR}"
 export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
@@ -108,7 +109,7 @@ fi
 
 python -u "${PYTHON_SCRIPT}" \
     --params-json "${PARAMS_JSON}" \
-    --diameters-m "${DIAMETERS_NM[@]}" \
+    --diameters-m "${DIAMETERS_M[@]}" \
     --n-replicates "${N_REPLICATES}" \
     --n-workers "${N_WORKERS}" \
     --association-s "${ASSOCIATION_S}" \
@@ -116,7 +117,6 @@ python -u "${PYTHON_SCRIPT}" \
     --association-concentration-M "${ASSOCIATION_CONCENTRATION_M}" \
     --dissociation-concentration-M "${DISSOCIATION_CONCENTRATION_M}" \
     --pore-depth-m "${PORE_DEPTH_M}" \
-    --pitch-m "${PITCH_M}" \
     --rim-z-m "${RIM_Z_M}" \
     --layout "${LAYOUT}" \
     --record-every-s "${RECORD_EVERY_S}" \
@@ -124,7 +124,6 @@ python -u "${PYTHON_SCRIPT}" \
     --dissociation-frames "${DISSOCIATION_FRAMES}" \
     --table-format "${TABLE_FORMAT}" \
     --output-root "${OUTPUT_ROOT}" \
-    "${OPTIONAL_ARGS[@]}"
 
 echo "Protocol completed successfully."
 date
