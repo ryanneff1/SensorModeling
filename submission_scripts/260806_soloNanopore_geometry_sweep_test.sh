@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
 #SBATCH --mem-per-cpu=4G
-#SBATCH --job-name=260806_nanopore_geometry_sweep
+#SBATCH --job-name=260806_nanopore_geometry_sweep_test
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
 #SBATCH --mail-type=ALL
