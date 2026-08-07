@@ -89,20 +89,6 @@ date
 python --version
 
 # -----------------------------------------------------------------------------
-# Build optional command-line arguments
-# -----------------------------------------------------------------------------
-
-OPTIONAL_ARGS=()
-
-if [[ -n "${EDGE_MARGIN_M}" ]]; then
-    OPTIONAL_ARGS+=(--edge-margin-m "${EDGE_MARGIN_M}")
-fi
-
-if [[ "${OVERWRITE}" == "true" ]]; then
-    OPTIONAL_ARGS+=(--overwrite)
-fi
-
-# -----------------------------------------------------------------------------
 # Run the protocol
 # -----------------------------------------------------------------------------
 
@@ -124,7 +110,7 @@ python -u "${PYTHON_SCRIPT}" \
     --dissociation-frames "${DISSOCIATION_FRAMES}" \
     --table-format "${TABLE_FORMAT}" \
     --output-root "${OUTPUT_ROOT}" \
-    "${OPTIONAL_ARGS[@]}"
+    --overwrite "${OVERWRITE}"
 
 echo "Protocol completed successfully."
 date
