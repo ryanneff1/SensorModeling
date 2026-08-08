@@ -65,6 +65,7 @@ module purge
 module load anaconda3/2022.05
 
 # Quest batch-job activation sequence for the conda module.
+eval "$(conda shell.bash hook)"
 conda activate "${CONDA_ENV}"
 
 # Keep each IPyParallel engine single-threaded.
@@ -73,10 +74,9 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-mkdir -p "${IPYTHONDIR}" "${OUTPUT_ROOT}"
+mkdir -p "${OUTPUT_ROOT}"
 
 cd "${PROJECT_DIR}"
-export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
 
 # -----------------------------------------------------------------------------
 # Diagnostics
@@ -94,7 +94,7 @@ python --version
 
 python -u "${PYTHON_SCRIPT}" \
     --params-json "${PARAMS_JSON}" \
-    --diameters-m "${DIAMETERS_NM[@]}" \
+    --diameters-m "${DIAMETERS_M[@]}" \
     --n-replicates "${N_REPLICATES}" \
     --n-workers "${N_WORKERS}" \
     --association-s "${ASSOCIATION_S}" \
@@ -102,7 +102,6 @@ python -u "${PYTHON_SCRIPT}" \
     --association-concentration-M "${ASSOCIATION_CONCENTRATION_M}" \
     --dissociation-concentration-M "${DISSOCIATION_CONCENTRATION_M}" \
     --pore-depth-m "${PORE_DEPTH_M}" \
-    --pitch-m "${PITCH_M}" \
     --rim-z-m "${RIM_Z_M}" \
     --layout "${LAYOUT}" \
     --record-every-s "${RECORD_EVERY_S}" \
