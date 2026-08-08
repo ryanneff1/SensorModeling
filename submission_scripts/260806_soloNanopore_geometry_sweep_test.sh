@@ -25,7 +25,7 @@ PROJECT_DIR="/home/rnt2664/SensorModeling"
 # pyarrow, tqdm, ipyparallel, and the other packages used by the model.
 CONDA_ENV="sensor-modeling-env"
 
-PYTHON_SCRIPT="${PROJECT_DIR}/submission_scripts/nanopore_geometry_sweep.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/nanopore_geometry_sweep.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/soloNanopore_base_params.json"
 OUTPUT_ROOT="${PROJECT_DIR}/results/260806_nanopore_geometry_sweep"
 
