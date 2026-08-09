@@ -47,12 +47,6 @@ ASSOCIATION_FRAMES=20
 DISSOCIATION_FRAMES=20
 TABLE_FORMAT="parquet"
 
-# Leave empty to let the Python geometry function choose its default margin.
-EDGE_MARGIN_M=""
-
-# Set to true only when existing replicate directories should be replaced.
-OVERWRITE=True
-
 # Use one IPyParallel engine per allocated Slurm CPU. The Python script will
 # automatically reduce this value if there are fewer tasks than engines.
 N_WORKERS=16
@@ -60,6 +54,8 @@ N_WORKERS=16
 # -----------------------------------------------------------------------------
 # Quest software environment
 # -----------------------------------------------------------------------------
+unset PYTHONPATH
+unset PYTHONHOME
 
 module purge
 module load anaconda3/2022.05
@@ -75,6 +71,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 mkdir -p "${OUTPUT_ROOT}"
+export PYTHONPATH="${PROJECT_DIR}"
 
 cd "${PROJECT_DIR}"
 
@@ -109,7 +106,7 @@ python -u "${PYTHON_SCRIPT}" \
     --dissociation-frames "${DISSOCIATION_FRAMES}" \
     --table-format "${TABLE_FORMAT}" \
     --output-root "${OUTPUT_ROOT}" \
-    --overwrite "${OVERWRITE}"
+    --overwrite
 
 echo "Protocol completed successfully."
 date
