@@ -1,0 +1,31 @@
+{
+  "geometry_type": "dendritic_nanospike_planar",
+  "geometry": {
+    "base_z_m": 0.0,
+    "spike_density_m2": 5e14,
+    "n_primary_spikes": null,
+    "use_poisson_spike_count": false,
+    "primary_height_mean_m": 100e-9,
+    "primary_height_sd_m": 25e-9,
+    "primary_base_radius_mean_m": 10e-9,
+    "primary_base_radius_sd_m": 3e-9,
+    "primary_tip_radius_mean_m": 5e-9,
+    "primary_tip_radius_sd_m": 1e-9,
+    "primary_tilt_mean_deg": 10.0,
+    "primary_tilt_sd_deg": 5.0,
+    "branch_levels": 3,
+    "branches_per_segment_mean": 3,
+    "branch_origin_fraction_range": [0.10, 0.90],
+    "branch_length_fraction_mean": 0.50,
+    "branch_length_fraction_sd": 0.10,
+    "branch_angle_mean_deg": 45.0,
+    "branch_angle_sd_deg": 10.0,
+    "branch_radius_fraction": 0.50,
+    "branch_tip_radius_fraction": 0.35,
+    "min_primary_spacing_m": null,
+    "edge_margin_m": null,
+    "geometry_seed": 1,
+    "max_total_segments": null,
+    "name": "dendritic_nanospike_planar"
+  }
+}

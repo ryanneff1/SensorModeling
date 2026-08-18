@@ -602,6 +602,471 @@ def make_cylindrical_well_geometry(
 
     return make_height_field_geometry(P, height, name=name)
 
+
+def _sample_positive_normal(rng, mean, sd, minimum, maximum=None, max_attempts=100):
+    """Sample a bounded approximately normal scalar."""
+    mean = float(mean)
+    sd = float(sd)
+    minimum = float(minimum)
+    maximum = None if maximum is None else float(maximum)
+    if maximum is not None and maximum < minimum:
+        raise ValueError("maximum must be >= minimum")
+    if sd <= 0:
+        value = mean
+    else:
+        for _ in range(int(max_attempts)):
+            value = float(rng.normal(mean, sd))
+            if value >= minimum and (maximum is None or value <= maximum):
+                return value
+        value = mean
+    value = max(value, minimum)
+    if maximum is not None:
+        value = min(value, maximum)
+    return float(value)
+
+
+def _nanospike_primary_direction(rng, tilt_mean_deg, tilt_sd_deg):
+    tilt_deg = _sample_positive_normal(
+        rng, tilt_mean_deg, tilt_sd_deg, minimum=0.0, maximum=85.0
+    )
+    tilt = np.deg2rad(tilt_deg)
+    azimuth = rng.uniform(0.0, 2.0 * np.pi)
+    return np.array([
+        np.sin(tilt) * np.cos(azimuth),
+        np.sin(tilt) * np.sin(azimuth),
+        np.cos(tilt),
+    ], dtype=float)
+
+
+def _nanospike_perpendicular_basis(direction):
+    direction = np.asarray(direction, dtype=float)
+    direction = direction / np.linalg.norm(direction)
+    reference = (
+        np.array([0.0, 0.0, 1.0])
+        if abs(direction[2]) < 0.9
+        else np.array([1.0, 0.0, 0.0])
+    )
+    e1 = np.cross(direction, reference)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(direction, e1)
+    e2 /= np.linalg.norm(e2)
+    return e1, e2
+
+
+def _nanospike_branch_direction(
+    rng,
+    parent_direction,
+    angle_mean_deg,
+    angle_sd_deg,
+    minimum_upward_z=0.05,
+    max_attempts=50,
+):
+    parent_direction = np.asarray(parent_direction, dtype=float)
+    parent_direction /= np.linalg.norm(parent_direction)
+    e1, e2 = _nanospike_perpendicular_basis(parent_direction)
+    direction = parent_direction.copy()
+    for _ in range(int(max_attempts)):
+        angle_deg = _sample_positive_normal(
+            rng, angle_mean_deg, angle_sd_deg, minimum=5.0, maximum=85.0
+        )
+        angle = np.deg2rad(angle_deg)
+        azimuth = rng.uniform(0.0, 2.0 * np.pi)
+        transverse = np.cos(azimuth) * e1 + np.sin(azimuth) * e2
+        direction = (
+            np.cos(angle) * parent_direction
+            + np.sin(angle) * transverse
+        )
+        direction /= np.linalg.norm(direction)
+        if direction[2] >= minimum_upward_z:
+            return direction
+    direction[2] = max(direction[2], minimum_upward_z)
+    direction /= np.linalg.norm(direction)
+    return direction
+
+
+def _nanospike_segment_fits_domain(start_m, end_m, radius_m, P):
+    start_m = np.asarray(start_m, dtype=float)
+    end_m = np.asarray(end_m, dtype=float)
+    radius_m = float(radius_m)
+    Nx, Ny, _ = _grid_counts(P)
+    x_max_m = (Nx - 1) * P.a_m
+    y_max_m = (Ny - 1) * P.a_m
+    return (
+        min(start_m[0], end_m[0]) - radius_m >= 0.0
+        and max(start_m[0], end_m[0]) + radius_m <= x_max_m
+        and min(start_m[1], end_m[1]) - radius_m >= 0.0
+        and max(start_m[1], end_m[1]) + radius_m <= y_max_m
+        and max(start_m[2], end_m[2]) + radius_m <= P.H_m
+    )
+
+
+def _voxelize_tapered_nanospike_segment(
+    solid_mask,
+    P,
+    start_m,
+    end_m,
+    radius_start_m,
+    radius_end_m,
+):
+    """Union a linearly tapered cylindrical segment into a Boolean solid mask."""
+    start_m = np.asarray(start_m, dtype=float)
+    end_m = np.asarray(end_m, dtype=float)
+    axis = end_m - start_m
+    axis2 = float(np.dot(axis, axis))
+    if axis2 <= 0:
+        return
+
+    padding = max(float(radius_start_m), float(radius_end_m)) + P.a_m
+    mins = np.floor((np.minimum(start_m, end_m) - padding) / P.a_m).astype(int)
+    maxs = np.ceil((np.maximum(start_m, end_m) + padding) / P.a_m).astype(int)
+    mins = np.maximum(mins, 0)
+    maxs = np.minimum(maxs, np.asarray(solid_mask.shape) - 1)
+    if np.any(maxs < mins):
+        return
+
+    ix = np.arange(mins[0], maxs[0] + 1)
+    iy = np.arange(mins[1], maxs[1] + 1)
+    iz = np.arange(mins[2], maxs[2] + 1)
+    X, Y, Z = np.meshgrid(ix, iy, iz, indexing='ij')
+    points = np.stack([X, Y, Z], axis=-1).astype(float) * P.a_m
+
+    relative = points - start_m
+    fraction = np.sum(relative * axis, axis=-1) / axis2
+    fraction = np.clip(fraction, 0.0, 1.0)
+    closest = start_m + fraction[..., None] * axis
+    distance2 = np.sum((points - closest) ** 2, axis=-1)
+    local_radius = (
+        float(radius_start_m)
+        + fraction * (float(radius_end_m) - float(radius_start_m))
+    )
+    inside = distance2 <= local_radius**2
+
+    view = solid_mask[
+        mins[0]:maxs[0] + 1,
+        mins[1]:maxs[1] + 1,
+        mins[2]:maxs[2] + 1,
+    ]
+    view |= inside
+
+
+def _sample_nanospike_primary_centers(
+    rng,
+    n_primary,
+    P,
+    edge_margin_m,
+    min_spacing_m,
+    max_attempts_per_spike=1000,
+):
+    Nx, Ny, _ = _grid_counts(P)
+    x_max_m = (Nx - 1) * P.a_m
+    y_max_m = (Ny - 1) * P.a_m
+    x0, x1 = float(edge_margin_m), x_max_m - float(edge_margin_m)
+    y0, y1 = float(edge_margin_m), y_max_m - float(edge_margin_m)
+    if x0 > x1 or y0 > y1:
+        raise ValueError('edge_margin_m leaves no room for nanospike roots.')
+
+    centers = []
+    min_d2 = float(min_spacing_m) ** 2
+    for _ in range(int(n_primary)):
+        accepted = False
+        for _attempt in range(int(max_attempts_per_spike)):
+            candidate = np.array([rng.uniform(x0, x1), rng.uniform(y0, y1)])
+            if centers and min_spacing_m > 0:
+                existing = np.asarray(centers)
+                if np.any(np.sum((existing - candidate) ** 2, axis=1) < min_d2):
+                    continue
+            centers.append(candidate)
+            accepted = True
+            break
+        if not accepted:
+            warnings.warn(
+                'Could not place every requested primary nanospike while '
+                'respecting min_primary_spacing_m.',
+                RuntimeWarning,
+            )
+            break
+    return np.asarray(centers, dtype=float).reshape(-1, 2)
+
+
+def make_dendritic_nanospike_geometry(
+    P: Params,
+    base_z_m: float = 0.0,
+    spike_density_m2: float = 1e14,
+    n_primary_spikes: Optional[int] = None,
+    use_poisson_spike_count: bool = False,
+    primary_height_mean_m: float = 120e-9,
+    primary_height_sd_m: float = 25e-9,
+    primary_base_radius_mean_m: float = 18e-9,
+    primary_base_radius_sd_m: float = 4e-9,
+    primary_tip_radius_mean_m: float = 4e-9,
+    primary_tip_radius_sd_m: float = 1e-9,
+    primary_tilt_mean_deg: float = 10.0,
+    primary_tilt_sd_deg: float = 6.0,
+    branch_levels: int = 2,
+    branches_per_segment_mean: float = 1.8,
+    branch_origin_fraction_range: Tuple[float, float] = (0.30, 0.85),
+    branch_length_fraction_mean: float = 0.45,
+    branch_length_fraction_sd: float = 0.10,
+    branch_angle_mean_deg: float = 48.0,
+    branch_angle_sd_deg: float = 12.0,
+    branch_radius_fraction: float = 0.55,
+    branch_tip_radius_fraction: float = 0.35,
+    min_primary_spacing_m: Optional[float] = None,
+    edge_margin_m: Optional[float] = None,
+    geometry_seed: Optional[int] = None,
+    max_total_segments: int = 5000,
+    name: str = 'dendritic_nanospike_planar',
+) -> SensorGeometry:
+    """Decorate a planar gold surface with stochastic dendritic nanospikes.
+
+    The surface is built as a true 3-D voxel mask, so tilted trunks, side
+    branches, overhangs, and inter-spike voids are retained. Primary trunks are
+    tapered segments rooted in the planar base. Each eligible segment emits a
+    Poisson-distributed number of smaller child branches until ``branch_levels``
+    is reached.
+
+    This geometry is directly compatible with the well-mixed-reservoir model:
+    ``derive()`` finds the highest solid voxel and places the mixed reservoir
+    above that global canopy, while all fluid among the spikes remains part of
+    the explicit diffusion domain.
+
+    Set ``geometry_seed`` explicitly when the same physical nanospike morphology
+    should be reused across Monte Carlo replicates with different ``P.seed``.
+    """
+    if base_z_m < 0 or base_z_m >= P.H_m:
+        raise ValueError('base_z_m must satisfy 0 <= base_z_m < P.H_m.')
+    if spike_density_m2 < 0:
+        raise ValueError('spike_density_m2 cannot be negative.')
+    if n_primary_spikes is not None and int(n_primary_spikes) < 0:
+        raise ValueError('n_primary_spikes cannot be negative.')
+    if int(branch_levels) < 0:
+        raise ValueError('branch_levels cannot be negative.')
+    if float(branches_per_segment_mean) < 0:
+        raise ValueError('branches_per_segment_mean cannot be negative.')
+    if int(max_total_segments) < 1:
+        raise ValueError('max_total_segments must be at least 1.')
+
+    origin_lo, origin_hi = map(float, branch_origin_fraction_range)
+    if not (0.0 <= origin_lo < origin_hi <= 1.0):
+        raise ValueError(
+            'branch_origin_fraction_range must satisfy 0 <= low < high <= 1.'
+        )
+
+    Nx, Ny, Nz = _grid_counts(P)
+    shape = (Nx, Ny, Nz + 1)
+    z_m = np.arange(Nz + 1, dtype=float) * P.a_m
+    solid_mask = np.broadcast_to(
+        z_m[None, None, :] <= float(base_z_m) + 1e-12 * P.a_m,
+        shape,
+    ).copy()
+
+    seed = int(P.seed if geometry_seed is None else geometry_seed)
+    rng = np.random.default_rng(seed)
+    projected_area_m2 = P.Lx_m * P.Ly_m
+    expected_primary_count = float(spike_density_m2) * projected_area_m2
+
+    if n_primary_spikes is None:
+        n_primary = (
+            int(rng.poisson(expected_primary_count))
+            if use_poisson_spike_count
+            else int(round(expected_primary_count))
+        )
+    else:
+        n_primary = int(n_primary_spikes)
+
+    if min_primary_spacing_m is None:
+        min_primary_spacing_m = 2.0 * float(primary_base_radius_mean_m)
+    if edge_margin_m is None:
+        edge_margin_m = max(
+            1.5 * float(primary_base_radius_mean_m),
+            0.15 * float(primary_height_mean_m),
+        )
+
+    if primary_tip_radius_mean_m < 0.5 * P.a_m:
+        warnings.warn(
+            'The mean primary tip radius is below half a lattice spacing; '
+            'tip dimensions will be resolution-limited.',
+            RuntimeWarning,
+        )
+
+    primary_centers = _sample_nanospike_primary_centers(
+        rng,
+        n_primary,
+        P,
+        edge_margin_m=float(edge_margin_m),
+        min_spacing_m=float(min_primary_spacing_m),
+    )
+
+    segments = []
+    queue = deque()
+
+    def append_segment(start, end, r0, r1, level, parent_id, primary_id):
+        sid = len(segments)
+        vector = np.asarray(end, dtype=float) - np.asarray(start, dtype=float)
+        length = float(np.linalg.norm(vector))
+        direction = vector / length if length > 0 else np.array([0.0, 0.0, 1.0])
+        segments.append({
+            'segment_id': sid,
+            'parent_id': int(parent_id),
+            'primary_id': int(primary_id),
+            'level': int(level),
+            'start_m': np.asarray(start, dtype=float).copy(),
+            'end_m': np.asarray(end, dtype=float).copy(),
+            'direction': direction.copy(),
+            'length_m': length,
+            'radius_start_m': float(r0),
+            'radius_end_m': float(r1),
+        })
+        return sid
+
+    # Primary trunks.
+    for primary_id, xy in enumerate(primary_centers):
+        length = _sample_positive_normal(
+            rng,
+            primary_height_mean_m,
+            primary_height_sd_m,
+            minimum=P.a_m,
+            maximum=max(P.a_m, P.H_m - base_z_m - P.a_m),
+        )
+        r0 = _sample_positive_normal(
+            rng,
+            primary_base_radius_mean_m,
+            primary_base_radius_sd_m,
+            minimum=0.25 * P.a_m,
+        )
+        r1 = _sample_positive_normal(
+            rng,
+            primary_tip_radius_mean_m,
+            primary_tip_radius_sd_m,
+            minimum=0.10 * P.a_m,
+            maximum=r0,
+        )
+        start = np.array([xy[0], xy[1], float(base_z_m)])
+        accepted = False
+        for _ in range(100):
+            direction = _nanospike_primary_direction(
+                rng, primary_tilt_mean_deg, primary_tilt_sd_deg
+            )
+            end = start + length * direction
+            if _nanospike_segment_fits_domain(start, end, r0, P):
+                accepted = True
+                break
+        if not accepted:
+            warnings.warn(
+                f'Skipping primary nanospike {primary_id}: no sampled '
+                'orientation fit inside the domain.',
+                RuntimeWarning,
+            )
+            continue
+        sid = append_segment(start, end, r0, r1, 0, -1, primary_id)
+        queue.append(sid)
+
+    # Recursive branches.
+    while queue and len(segments) < int(max_total_segments):
+        parent_id = queue.popleft()
+        parent = segments[parent_id]
+        level = int(parent['level'])
+        if level >= int(branch_levels):
+            continue
+
+        n_children = int(rng.poisson(float(branches_per_segment_mean)))
+        for _ in range(n_children):
+            if len(segments) >= int(max_total_segments):
+                break
+            fraction = rng.uniform(origin_lo, origin_hi)
+            p0 = np.asarray(parent['start_m'])
+            p1 = np.asarray(parent['end_m'])
+            start = p0 + fraction * (p1 - p0)
+            parent_radius = (
+                float(parent['radius_start_m'])
+                + fraction * (
+                    float(parent['radius_end_m'])
+                    - float(parent['radius_start_m'])
+                )
+            )
+            length_fraction = _sample_positive_normal(
+                rng,
+                branch_length_fraction_mean,
+                branch_length_fraction_sd,
+                minimum=0.15,
+                maximum=0.80,
+            )
+            length = max(P.a_m, float(parent['length_m']) * length_fraction)
+            r0 = max(0.10 * P.a_m, parent_radius * float(branch_radius_fraction))
+            r1 = max(0.05 * P.a_m, r0 * float(branch_tip_radius_fraction))
+
+            accepted = False
+            for _attempt in range(50):
+                direction = _nanospike_branch_direction(
+                    rng,
+                    np.asarray(parent['direction']),
+                    branch_angle_mean_deg,
+                    branch_angle_sd_deg,
+                )
+                end = start + length * direction
+                if end[2] <= base_z_m + 0.5 * P.a_m:
+                    continue
+                if _nanospike_segment_fits_domain(start, end, r0, P):
+                    accepted = True
+                    break
+            if not accepted:
+                continue
+
+            sid = append_segment(
+                start,
+                end,
+                r0,
+                r1,
+                level + 1,
+                parent_id,
+                int(parent['primary_id']),
+            )
+            queue.append(sid)
+
+    if len(segments) >= int(max_total_segments) and queue:
+        warnings.warn(
+            'Reached max_total_segments before all eligible branches were expanded.',
+            RuntimeWarning,
+        )
+
+    for segment in segments:
+        _voxelize_tapered_nanospike_segment(
+            solid_mask,
+            P,
+            segment['start_m'],
+            segment['end_m'],
+            segment['radius_start_m'],
+            segment['radius_end_m'],
+        )
+
+    geometry = geometry_from_solid_mask(P, solid_mask, name=name)
+    total_exposed_area_m2 = float(np.sum(geometry.surface_area_m2))
+    roughness_factor = (
+        total_exposed_area_m2 / projected_area_m2
+        if projected_area_m2 > 0
+        else np.nan
+    )
+    highest_solid_z_index = int(np.max(np.argwhere(solid_mask)[:, 2]))
+
+    geometry.nanospike_geometry_seed = seed
+    geometry.nanospike_primary_centers_xy_m = primary_centers
+    geometry.nanospike_expected_primary_count = expected_primary_count
+    geometry.nanospike_n_primary_requested = int(n_primary)
+    geometry.nanospike_n_primary_generated = int(
+        sum(int(s['level']) == 0 for s in segments)
+    )
+    geometry.nanospike_n_segments = int(len(segments))
+    geometry.nanospike_branch_levels = int(branch_levels)
+    geometry.nanospike_segments = segments
+    geometry.nanospike_base_z_m = float(base_z_m)
+    geometry.nanospike_canopy_z_m = float(highest_solid_z_index * P.a_m)
+    geometry.nanospike_projected_area_m2 = float(projected_area_m2)
+    geometry.nanospike_total_exposed_area_m2 = total_exposed_area_m2
+    geometry.roughness_factor = float(roughness_factor)
+
+    return geometry
+
+
 def make_nanopore_array_geometry(
     P: Params,
     pore_diameter_m: float,
