@@ -46,6 +46,335 @@ def predicted_occupancy_curve(
     return theta_eq + (theta0 - theta_eq) * np.exp(-k_obs * t_s)
 
 
+
+def _first_finite_history_value(history, mask, column, fallback=None):
+    """Return the first finite numeric value in a phase-specific history column."""
+    if column not in history.columns:
+        return fallback
+
+    values = np.asarray(history.loc[mask, column], dtype=float)
+    values = values[np.isfinite(values)]
+
+    if values.size:
+        return float(values[0])
+
+    return fallback
+
+
+def _phase_segments(history, P=None):
+    """
+    Describe the ordered simulation phases encoded in a history DataFrame.
+
+    The resumable simulation records ``phase_start_t_s`` and ``phase_label`` on
+    every newly generated history row. ``phase_start_t_s`` is used as the phase
+    identity because the same textual phase label may legitimately occur more
+    than once in a multi-step protocol.
+
+    Returns a list of dictionaries containing:
+        label
+        start_t_s
+        end_t_s
+        ligand_conc_M
+        k_on_M_inv_s
+        k_off_s
+    """
+    if history is None or len(history) == 0:
+        return []
+
+    h = history.sort_values("t_s").reset_index(drop=True)
+    time = h["t_s"].to_numpy(dtype=float)
+    t_min = float(np.nanmin(time))
+    t_max = float(np.nanmax(time))
+
+    fallback_conc = getattr(P, "ligand_conc_M", None) if P is not None else None
+    fallback_k_on = getattr(P, "k_on_M_inv_s", None) if P is not None else None
+    fallback_k_off = getattr(P, "k_off_s", None) if P is not None else None
+
+    phases = []
+
+    if "phase_start_t_s" in h.columns:
+        starts_raw = np.asarray(h["phase_start_t_s"], dtype=float)
+        finite_starts = starts_raw[np.isfinite(starts_raw)]
+
+        if finite_starts.size:
+            starts = np.unique(finite_starts)
+            starts.sort()
+
+            for i, start in enumerate(starts):
+                mask = np.isclose(
+                    starts_raw,
+                    start,
+                    rtol=1e-10,
+                    atol=max(1e-15, 1e-12 * max(1.0, abs(float(start)))),
+                )
+
+                if "phase_label" in h.columns:
+                    labels = (
+                        h.loc[mask, "phase_label"]
+                        .dropna()
+                        .astype(str)
+                        .tolist()
+                    )
+                    label = labels[0] if labels else f"phase {i + 1}"
+                else:
+                    label = f"phase {i + 1}"
+
+                end = float(starts[i + 1]) if i + 1 < len(starts) else t_max
+
+                phases.append(
+                    {
+                        "label": label,
+                        "start_t_s": float(start),
+                        "end_t_s": end,
+                        "ligand_conc_M": _first_finite_history_value(
+                            h,
+                            mask,
+                            "phase_ligand_conc_M",
+                            fallback_conc,
+                        ),
+                        "k_on_M_inv_s": _first_finite_history_value(
+                            h,
+                            mask,
+                            "phase_k_on_M_inv_s",
+                            fallback_k_on,
+                        ),
+                        "k_off_s": _first_finite_history_value(
+                            h,
+                            mask,
+                            "phase_k_off_s",
+                            fallback_k_off,
+                        ),
+                    }
+                )
+
+            return phases
+
+    if "phase_label" in h.columns:
+        labels = h["phase_label"].fillna("phase").astype(str).to_numpy()
+        change_indices = np.r_[0, np.flatnonzero(labels[1:] != labels[:-1]) + 1]
+
+        for i, start_index in enumerate(change_indices):
+            stop_index = (
+                int(change_indices[i + 1])
+                if i + 1 < len(change_indices)
+                else len(h)
+            )
+            mask = np.zeros(len(h), dtype=bool)
+            mask[start_index:stop_index] = True
+
+            start = float(time[start_index])
+            end = (
+                float(time[stop_index])
+                if stop_index < len(h)
+                else t_max
+            )
+
+            phases.append(
+                {
+                    "label": str(labels[start_index]),
+                    "start_t_s": start,
+                    "end_t_s": end,
+                    "ligand_conc_M": _first_finite_history_value(
+                        h,
+                        mask,
+                        "phase_ligand_conc_M",
+                        fallback_conc,
+                    ),
+                    "k_on_M_inv_s": _first_finite_history_value(
+                        h,
+                        mask,
+                        "phase_k_on_M_inv_s",
+                        fallback_k_on,
+                    ),
+                    "k_off_s": _first_finite_history_value(
+                        h,
+                        mask,
+                        "phase_k_off_s",
+                        fallback_k_off,
+                    ),
+                }
+            )
+
+        return phases
+
+    phases.append(
+        {
+            "label": "simulation",
+            "start_t_s": t_min,
+            "end_t_s": t_max,
+            "ligand_conc_M": fallback_conc,
+            "k_on_M_inv_s": fallback_k_on,
+            "k_off_s": fallback_k_off,
+        }
+    )
+    return phases
+
+
+def _draw_phase_annotations(
+    ax,
+    phases,
+    *,
+    show_phase_boundaries=True,
+    show_phase_labels=False,
+):
+    """Draw phase-transition lines and optional labels on an existing axes."""
+    if not phases:
+        return
+
+    if show_phase_boundaries and len(phases) > 1:
+        for phase in phases[1:]:
+            ax.axvline(
+                phase["start_t_s"],
+                linestyle=":",
+                linewidth=1.3,
+                alpha=0.75,
+            )
+
+    if show_phase_labels:
+        for phase in phases:
+            start = float(phase["start_t_s"])
+            end = float(phase["end_t_s"])
+
+            if end <= start:
+                continue
+
+            midpoint = 0.5 * (start + end)
+
+            ax.text(
+                midpoint,
+                0.98,
+                str(phase["label"]),
+                transform=ax.get_xaxis_transform(),
+                ha="center",
+                va="top",
+                fontsize="small",
+            )
+
+
+def _piecewise_langmuir_prediction(
+    history,
+    *,
+    P=None,
+    theta0=None,
+    points_per_phase=200,
+):
+    """
+    Return a continuous well-mixed prediction for a multi-phase protocol.
+
+    Each phase uses its own concentration, k_on, and k_off. The predicted
+    occupancy at the end of one phase becomes the initial condition for the
+    next phase.
+    """
+    phases = _phase_segments(history, P=P)
+
+    if not phases:
+        return [], phases
+
+    if theta0 is None:
+        if "theta" not in history.columns or len(history) == 0:
+            theta_start = 0.0
+        else:
+            theta_start = float(history.sort_values("t_s")["theta"].iloc[0])
+    else:
+        theta_start = float(theta0)
+
+    curves = []
+
+    for phase in phases:
+        concentration = phase["ligand_conc_M"]
+        k_on = phase["k_on_M_inv_s"]
+        k_off = phase["k_off_s"]
+
+        if concentration is None or k_on is None or k_off is None:
+            return [], phases
+
+        values = np.asarray(
+            [concentration, k_on, k_off],
+            dtype=float,
+        )
+
+        if not np.all(np.isfinite(values)):
+            return [], phases
+
+        start = float(phase["start_t_s"])
+        end = float(phase["end_t_s"])
+        duration = max(0.0, end - start)
+
+        n_points = max(2, int(points_per_phase))
+        local_t = np.linspace(0.0, duration, n_points)
+
+        theta = predicted_occupancy_curve(
+            local_t,
+            ligand_conc_M=float(concentration),
+            k_on_M_inv_s=float(k_on),
+            k_off_s=float(k_off),
+            theta0=theta_start,
+        )
+
+        absolute_t = start + local_t
+
+        curves.append(
+            {
+                "phase": phase,
+                "t_s": absolute_t,
+                "theta": theta,
+            }
+        )
+
+        theta_start = float(theta[-1])
+
+    return curves, phases
+
+
+def _phase_reset_counter(history, column):
+    """
+    Convert a cumulative counter into a phase-local cumulative counter.
+
+    This is useful when a microscopic State is continued between phases and the
+    event counters therefore do not reset at the phase boundary.
+    """
+    values = np.asarray(history[column], dtype=float)
+
+    if "phase_start_t_s" not in history.columns:
+        return values.copy()
+
+    starts = np.asarray(history["phase_start_t_s"], dtype=float)
+    time = np.asarray(history["t_s"], dtype=float)
+    result = np.full(values.shape, np.nan, dtype=float)
+
+    finite_starts = starts[np.isfinite(starts)]
+
+    if finite_starts.size == 0:
+        return values.copy()
+
+    for phase_start in np.sort(np.unique(finite_starts)):
+        phase_mask = np.isclose(
+            starts,
+            phase_start,
+            rtol=1e-10,
+            atol=max(1e-15, 1e-12 * max(1.0, abs(float(phase_start)))),
+        )
+
+        prior = np.flatnonzero(time <= phase_start + 1e-15)
+
+        if prior.size:
+            baseline = float(values[prior[-1]])
+        else:
+            phase_indices = np.flatnonzero(phase_mask)
+            baseline = (
+                float(values[phase_indices[0]])
+                if phase_indices.size
+                else 0.0
+            )
+
+        result[phase_mask] = values[phase_mask] - baseline
+
+    unresolved = ~np.isfinite(result)
+    result[unresolved] = values[unresolved]
+
+    return result
+
+
 def plot_occupancy(
     history,
     P=None,
@@ -53,22 +382,31 @@ def plot_occupancy(
     auto_ylim=False,
     show_bound_number=False,
     show_langmuir=True,
-    theta0=0.0,
+    theta0=None,
+    show_phase_boundaries=True,
+    show_phase_labels=False,
+    prediction_points_per_phase=200,
 ):
     """
-    Plot simulated receptor occupancy over time.
+    Plot simulated receptor occupancy over time for single- or multi-phase runs.
 
-    If P is provided, overlay the well-mixed Langmuir prediction using:
-        P.ligand_conc_M
-        P.k_on_M_inv_s
-        P.k_off_s
+    For a resumable multi-phase history, the well-mixed prediction is generated
+    piecewise using the phase-specific history fields:
 
-    Notes
-    -----
-    M in variable names means molar concentration (mol/L), not meters.
-    Therefore, the concentration and kinetic parameters do not require
-    conversion when the spatial coordinates are changed to meters.
+        phase_ligand_conc_M
+        phase_k_on_M_inv_s
+        phase_k_off_s
+        phase_start_t_s
+
+    The predicted endpoint of one phase becomes the initial occupancy of the
+    next phase, so the analytic curve is continuous across phase boundaries.
+
+    ``P`` is retained as a fallback for older single-phase histories that do not
+    contain phase-specific kinetic metadata.
     """
+    history = history.sort_values("t_s").reset_index(drop=True)
+    phases = _phase_segments(history, P=P)
+
     fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(
@@ -78,22 +416,56 @@ def plot_occupancy(
         label="Monte Carlo",
     )
 
-    if show_langmuir and P is not None:
-        theta_predicted = predicted_occupancy_curve(
-            history["t_s"],
-            ligand_conc_M=P.ligand_conc_M,
-            k_on_M_inv_s=P.k_on_M_inv_s,
-            k_off_s=P.k_off_s,
+    if show_langmuir:
+        curves, prediction_phases = _piecewise_langmuir_prediction(
+            history,
+            P=P,
             theta0=theta0,
+            points_per_phase=prediction_points_per_phase,
         )
 
-        ax.plot(
-            history["t_s"],
-            theta_predicted,
-            "--",
-            lw=2,
-            label="Predicted binding",
-        )
+        for i, curve in enumerate(curves):
+            ax.plot(
+                curve["t_s"],
+                curve["theta"],
+                "--",
+                lw=2,
+                label="Well-mixed prediction" if i == 0 else "_nolegend_",
+            )
+
+        # If neither phase metadata nor P provides kinetics, simply omit the
+        # analytic overlay rather than plotting an incorrect prediction.
+        if not curves and P is not None and len(phases) == 1:
+            t = history["t_s"].to_numpy(dtype=float)
+            t_local = t - float(t[0])
+            initial_theta = (
+                float(history["theta"].iloc[0])
+                if theta0 is None
+                else float(theta0)
+            )
+
+            theta_predicted = predicted_occupancy_curve(
+                t_local,
+                ligand_conc_M=P.ligand_conc_M,
+                k_on_M_inv_s=P.k_on_M_inv_s,
+                k_off_s=P.k_off_s,
+                theta0=initial_theta,
+            )
+
+            ax.plot(
+                t,
+                theta_predicted,
+                "--",
+                lw=2,
+                label="Well-mixed prediction",
+            )
+
+    _draw_phase_annotations(
+        ax,
+        phases,
+        show_phase_boundaries=show_phase_boundaries,
+        show_phase_labels=show_phase_labels,
+    )
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Fraction of receptors bound")
@@ -101,7 +473,7 @@ def plot_occupancy(
     if not auto_ylim:
         ax.set_ylim(0, 1.05)
 
-    ax.grid(True)
+    ax.grid(True, alpha=0.25)
 
     if show_bound_number:
         ax2 = ax.twinx()
@@ -117,16 +489,24 @@ def plot_occupancy(
         ax2.set_ylabel("Number of bound receptors")
 
         lines = ax.get_lines() + ax2.get_lines()
-        labels = [line.get_label() for line in lines]
-        ax.legend(lines, labels, loc="lower right")
+        labels = [
+            line.get_label()
+            for line in lines
+            if not line.get_label().startswith("_")
+        ]
+        visible_lines = [
+            line
+            for line in lines
+            if not line.get_label().startswith("_")
+        ]
+        ax.legend(visible_lines, labels, loc="upper right")
     else:
-        ax.legend(loc="lower right")
+        ax.legend(loc="upper right")
 
     ax.set_title("Sensor occupancy vs time")
 
     plt.tight_layout()
     return fig, ax
-
 
 def plot_state_3d(
     frame,
@@ -134,30 +514,31 @@ def plot_state_3d(
     ligand_size=30,
     receptor_size=60,
 ):
-    """
-    Plot a single simulation-state frame using spatial coordinates in meters.
-
-    Required frame keys
-    -------------------
-    receptor_xy_m : array-like
-        Receptor x-y coordinates in meters.
-    ligand_xyz_m : array-like
-        Free-ligand x-y-z coordinates in meters.
-    Lx_m, Ly_m, H_m : float
-        Simulation dimensions in meters.
-    """
+    """Plot one state frame, including phase information when available."""
     fig = plt.figure(figsize=figsize)
     ax = fig.add_subplot(111, projection="3d")
 
-    receptor_xy = frame["receptor_xy_m"]
-    bound = frame["receptor_bound"]
-    ligands = frame["ligand_xyz_m"]
+    bound = np.asarray(frame["receptor_bound"], dtype=bool)
+    ligands = np.asarray(frame["ligand_xyz_m"], dtype=float)
+
+    if "receptor_surface_center_m" in frame:
+        receptor_xyz = np.asarray(
+            frame["receptor_surface_center_m"],
+            dtype=float,
+        )
+    elif "receptor_xyz_m" in frame:
+        receptor_xyz = np.asarray(frame["receptor_xyz_m"], dtype=float)
+    else:
+        receptor_xy = np.asarray(frame["receptor_xy_m"], dtype=float)
+        receptor_xyz = np.column_stack(
+            [receptor_xy, np.zeros(receptor_xy.shape[0])]
+        )
 
     if np.any(~bound):
         ax.scatter(
-            receptor_xy[~bound, 0],
-            receptor_xy[~bound, 1],
-            np.zeros(np.sum(~bound)),
+            receptor_xyz[~bound, 0],
+            receptor_xyz[~bound, 1],
+            receptor_xyz[~bound, 2],
             s=receptor_size,
             alpha=0.35,
             label="unbound receptors",
@@ -165,9 +546,9 @@ def plot_state_3d(
 
     if np.any(bound):
         ax.scatter(
-            receptor_xy[bound, 0],
-            receptor_xy[bound, 1],
-            np.zeros(np.sum(bound)),
+            receptor_xyz[bound, 0],
+            receptor_xyz[bound, 1],
+            receptor_xyz[bound, 2],
             s=receptor_size,
             marker="^",
             alpha=0.9,
@@ -192,18 +573,24 @@ def plot_state_3d(
     ax.set_ylabel("y (m)")
     ax.set_zlabel("z (m)")
 
+    phase_text = ""
+    if "phase_label" in frame:
+        phase_text = f" | phase = {frame['phase_label']}"
+
+        if "phase_elapsed_s" in frame:
+            phase_text += f" ({float(frame['phase_elapsed_s']):.3e} s)"
+
     ax.set_title(
-        f"t = {frame['t_s']:.3e} s | "
+        f"t = {frame['t_s']:.3e} s{phase_text}\n"
         f"B = {frame['B']} | "
         f"theta = {frame['theta']:.3f} | "
         f"N_free = {frame['N_free']}"
     )
 
-    ax.legend(loc="upper left")
+    ax.legend(loc="upper right")
     plt.tight_layout()
 
     return fig, ax
-
 
 def _extract_surface_face_centers(
     solid_mask,
@@ -678,9 +1065,22 @@ def animate_state_frames(
         else:
             theta_text = "NA"
 
+        phase_label = frame.get("phase_label")
+        phase_elapsed_s = frame.get("phase_elapsed_s")
+
+        if phase_label is None:
+            phase_text = ""
+        elif phase_elapsed_s is None:
+            phase_text = f" | phase = {phase_label}"
+        else:
+            phase_text = (
+                f" | phase = {phase_label} "
+                f"({float(phase_elapsed_s):.3e} s)"
+            )
+
         ax.set_title(
             f"{geometry_name} | frame {i + 1}/{len(state_frames)}\n"
-            f"t = {frame['t_s']:.3e} s | "
+            f"t = {frame['t_s']:.3e} s{phase_text}\n"
             f"B = {bound_count} | "
             f"theta = {theta_text} | "
             f"N_free = {free_count} | "
@@ -730,8 +1130,16 @@ def animate_state_frames(
 
     return ani
 
-def plot_ligand_count(history, figsize=(7, 4)):
-    """Plot active, free, and bound ligand counts over time."""
+def plot_ligand_count(
+    history,
+    figsize=(7, 4),
+    show_phase_boundaries=True,
+    show_phase_labels=False,
+):
+    """Plot active, free, and bound ligand counts with phase annotations."""
+    history = history.sort_values("t_s").reset_index(drop=True)
+    phases = _phase_segments(history)
+
     fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(
@@ -752,42 +1160,115 @@ def plot_ligand_count(history, figsize=(7, 4)):
         label="bound ligands",
     )
 
+    _draw_phase_annotations(
+        ax,
+        phases,
+        show_phase_boundaries=show_phase_boundaries,
+        show_phase_labels=show_phase_labels,
+    )
+
     ax.set_xlabel("time (s)")
     ax.set_ylabel("ligand count")
-    ax.set_title("Ligands in simulation volume")
+    ax.set_title("Ligands in explicit simulation volume")
     ax.legend()
-    ax.grid(True)
+    ax.grid(True, alpha=0.25)
 
     plt.tight_layout()
     return fig, ax
 
+def plot_exchange_balance(
+    history,
+    figsize=(7, 4),
+    as_rate=False,
+    show_phase_boundaries=True,
+    show_phase_labels=False,
+):
+    """
+    Plot ligand entries and losses for a single- or multi-phase simulation.
 
-def plot_exchange_balance(history, figsize=(7, 4)):
-    """Plot ligand entries and losses per recorded time interval."""
-    h = history.copy()
+    The simulation carries event counters continuously across resumed phases, so
+    the increments are calculated from the cumulative bulk-entry/loss counters.
 
-    h["entered_increment"] = h["entered_from_bulk_total"].diff().fillna(0)
-    h["lost_increment"] = h["lost_to_bulk_total"].diff().fillna(0)
+    Parameters
+    ----------
+    as_rate : bool
+        If False, plot events per recorded interval. If True, divide by the
+        elapsed time between history rows and plot events per second. ``as_rate``
+        is useful when different phases were saved with different record
+        intervals.
+    """
+    h = history.sort_values("t_s").reset_index(drop=True).copy()
+    phases = _phase_segments(h)
+
+    entered = h["entered_from_bulk_total"].to_numpy(dtype=float)
+    lost = h["lost_to_bulk_total"].to_numpy(dtype=float)
+
+    entered_increment = np.diff(entered, prepend=entered[0])
+    lost_increment = np.diff(lost, prepend=lost[0])
+
+    # Defensive support for histories assembled from independent runs whose
+    # counters were reset rather than microscopically continued.
+    entered_increment = np.where(
+        entered_increment >= 0,
+        entered_increment,
+        entered,
+    )
+    lost_increment = np.where(
+        lost_increment >= 0,
+        lost_increment,
+        lost,
+    )
+
+    if as_rate:
+        time = h["t_s"].to_numpy(dtype=float)
+        dt = np.diff(time, prepend=np.nan)
+
+        entered_plot = np.divide(
+            entered_increment,
+            dt,
+            out=np.full_like(entered_increment, np.nan, dtype=float),
+            where=dt > 0,
+        )
+        lost_plot = np.divide(
+            lost_increment,
+            dt,
+            out=np.full_like(lost_increment, np.nan, dtype=float),
+            where=dt > 0,
+        )
+        ylabel = "ligands s$^{-1}$"
+        title = "Bulk exchange rate"
+    else:
+        entered_plot = entered_increment
+        lost_plot = lost_increment
+        ylabel = "ligand count per record interval"
+        title = "Bulk exchange balance"
 
     fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(
         h["t_s"],
-        h["entered_increment"],
-        label="entered per record",
+        entered_plot,
+        label="entered from bulk",
     )
 
     ax.plot(
         h["t_s"],
-        h["lost_increment"],
-        label="lost per record",
+        lost_plot,
+        label="lost to bulk",
+    )
+
+    _draw_phase_annotations(
+        ax,
+        phases,
+        show_phase_boundaries=show_phase_boundaries,
+        show_phase_labels=show_phase_labels,
     )
 
     ax.set_xlabel("time (s)")
-    ax.set_ylabel("ligand count per record interval")
-    ax.set_title("Bulk exchange balance")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     ax.legend()
-    ax.grid(True)
+    ax.grid(True, alpha=0.25)
 
     plt.tight_layout()
     return fig, ax
@@ -799,63 +1280,28 @@ def plot_rebinding_events_over_time(
     show_self=True,
     show_cross=True,
     normalize=False,
+    reset_each_phase=False,
     time_scale="linear",
+    show_phase_boundaries=True,
+    show_phase_labels=False,
     title="Cumulative rebinding events",
     figsize=(7, 5),
 ):
     """
-    Plot cumulative rebinding events over simulation time.
+    Plot rebinding events over a single- or multi-phase simulation.
 
     Parameters
     ----------
-    history : pandas.DataFrame
-        Simulation history returned by ``run_simulation``. Expected columns
-        include:
-
-        - ``t_s``
-        - ``rebinding_events_total``
-        - ``self_rebindings_total``
-        - ``cross_rebindings_total``
-        - ``unbinding_events_total`` when normalize=True
-
-    ax : matplotlib.axes.Axes or None
-        Existing axes on which to draw. If None, a new figure and axes are
-        created.
-
-    show_total : bool
-        Plot all rebinding events.
-
-    show_self : bool
-        Plot self-rebinding events, where the ligand returns to the receptor
-        from which it dissociated.
-
-    show_cross : bool
-        Plot cross-rebinding events, where the ligand binds a different
-        receptor.
+    reset_each_phase : bool
+        If False, plot the microscopic State's cumulative counters across the
+        complete protocol. If True, subtract the counter value at each phase
+        boundary so every phase starts from zero. This is useful for comparing
+        association- versus dissociation-phase rebinding.
 
     normalize : bool
-        If False, plot cumulative event counts.
-
-        If True, divide each cumulative rebinding count by the cumulative
-        number of unbinding events. The result is then a cumulative rebinding
-        fraction rather than a raw count.
-
-    time_scale : {"linear", "log"}
-        Scale used for the time axis.
-
-    title : str or None
-        Plot title. Use None to omit the title.
-
-    figsize : tuple
-        Figure size used when ax is not supplied.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        Matplotlib figure.
-
-    ax : matplotlib.axes.Axes
-        Matplotlib axes.
+        Divide rebinding counts by unbinding counts. When
+        ``reset_each_phase=True``, both numerator and denominator are reset at
+        each phase boundary, giving a phase-local cumulative rebinding fraction.
     """
     required_columns = {"t_s"}
 
@@ -884,6 +1330,9 @@ def plot_rebinding_events_over_time(
             "At least one of show_total, show_self, or show_cross must be True."
         )
 
+    history = history.sort_values("t_s").reset_index(drop=True)
+    phases = _phase_segments(history)
+
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
     else:
@@ -892,64 +1341,74 @@ def plot_rebinding_events_over_time(
     time_s = history["t_s"].to_numpy(dtype=float)
 
     if normalize:
-        unbinding_count = history[
-            "unbinding_events_total"
-        ].to_numpy(dtype=float)
+        if reset_each_phase:
+            unbinding_count = _phase_reset_counter(
+                history,
+                "unbinding_events_total",
+            )
+        else:
+            unbinding_count = history[
+                "unbinding_events_total"
+            ].to_numpy(dtype=float)
 
-        # A fraction is undefined before the first unbinding event. Use NaN
-        # there so Matplotlib does not display a misleading value.
         denominator = np.where(
             unbinding_count > 0,
             unbinding_count,
             np.nan,
         )
 
-        y_label = "Cumulative rebinding fraction"
+        y_label = (
+            "Phase-local cumulative rebinding fraction"
+            if reset_each_phase
+            else "Cumulative rebinding fraction"
+        )
     else:
         denominator = 1.0
-        y_label = "Cumulative event count"
-
-    if show_total:
-        values = (
-            history["rebinding_events_total"].to_numpy(dtype=float)
-            / denominator
+        y_label = (
+            "Phase-local cumulative event count"
+            if reset_each_phase
+            else "Cumulative event count"
         )
 
-        ax.step(
-            time_s,
-            values,
-            where="post",
-            linewidth=2,
-            label="all rebindings",
+    series = []
+
+    if show_total:
+        series.append(
+            ("rebinding_events_total", "all rebindings", 2.0)
         )
 
     if show_self:
-        values = (
-            history["self_rebindings_total"].to_numpy(dtype=float)
-            / denominator
-        )
-
-        ax.step(
-            time_s,
-            values,
-            where="post",
-            linewidth=1.7,
-            label="self-rebindings",
+        series.append(
+            ("self_rebindings_total", "self-rebindings", 1.7)
         )
 
     if show_cross:
-        values = (
-            history["cross_rebindings_total"].to_numpy(dtype=float)
-            / denominator
+        series.append(
+            ("cross_rebindings_total", "cross-rebindings", 1.7)
         )
+
+    for column, label, linewidth in series:
+        if reset_each_phase:
+            numerator = _phase_reset_counter(history, column)
+        else:
+            numerator = history[column].to_numpy(dtype=float)
+
+        values = numerator / denominator
 
         ax.step(
             time_s,
             values,
             where="post",
-            linewidth=1.7,
-            label="cross-rebindings",
+            linewidth=linewidth,
+            label=label,
         )
+
+    _draw_phase_annotations(
+        ax,
+        phases,
+        show_phase_boundaries=show_phase_boundaries,
+        show_phase_labels=show_phase_labels,
+    )
 
     ax.set_xscale(time_scale)
     ax.set_xlabel("Time (s)")
@@ -960,20 +1419,11 @@ def plot_rebinding_events_over_time(
 
     ax.grid(alpha=0.25)
 
-    ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        borderaxespad=0.0,
-    )
+    ax.legend(loc="upper right")
 
     fig.tight_layout()
 
     return fig, ax
-
-# -----------------------------------------------------------------------------
-# Generalized geometry and receptor inspection
-# -----------------------------------------------------------------------------
-
 
 def prepare_geometry_inspection(P, geometry=None):
     """Derive a geometry and initialize its receptor distribution without running.
@@ -1104,6 +1554,8 @@ def plot_geometry_receptors_3d(
     reactive_alpha=0.35,
     elev=24,
     azim=-55,
+    zoom=1.0,
+    show_legend=True,
 ):
     """Plot the generalized sensor surface and initialized receptors in 3D.
 
@@ -1245,23 +1697,24 @@ def plot_geometry_receptors_3d(
     ax.set_ylabel("y (m)")
     ax.set_zlabel("z (m)")
     ax.set_title(
-        f"{geom.name}: surface geometry and receptor distribution\n"
+        f"{geom.name}\n"
         f"reactive area = {G.sensing_area_m2:.3e} m$^2$, "
         f"receptors = {G.NR:,}"
     )
     ax.view_init(elev=elev, azim=azim)
+    ax.set_box_aspect(None, zoom=zoom)
 
-    handles, labels = ax.get_legend_handles_labels()
-    if handles:
-        ax.legend(
-            handles,
-            labels,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0,
-        )
+    if show_legend:
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(
+                handles,
+                labels,
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.0),
+                borderaxespad=0,
+            )
 
-    fig.subplots_adjust(right=0.78)
     return fig, ax
 
 

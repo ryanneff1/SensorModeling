@@ -1,7 +1,7 @@
 {
-  "Lx_m": 0.5e-6,
-  "Ly_m": 0.5e-6,
-  "H_m": 0.25e-6,
+  "Lx_m": 2e-6,
+  "Ly_m": 2e-6,
+  "H_m": 0.5e-6,
   "a_m": 10e-9,
   "D_m2_s": 1e-11,
   "receptor_density_m2": 5e15,

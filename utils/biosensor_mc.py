@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - used only when scipy is unavailable
     distance_transform_edt = None
 
 
-MODEL_VERSION = "2026-08-05-resumable-phases-v1"
+MODEL_VERSION = "2026-08-17-well-mixed-reservoir-v1"
 
 NA = 6.02214076e23
 L_PER_M3 = 1e3
@@ -108,6 +108,18 @@ class Params:
         "z_max",
     )
 
+    # Optional reduced-order mixing model. When enabled, the explicitly
+    # simulated diffusion domain ends reservoir_offset_layers lattice spacings
+    # above the highest solid sensor voxel. A constant-concentration,
+    # well-mixed reservoir occupies the region above that internal interface.
+    #
+    # reservoir_offset_layers=1 leaves one complete explicit fluid lattice
+    # layer between the upper sensor envelope and the reservoir. In this mode,
+    # the outer box boundaries are reflecting; all bulk exchange occurs through
+    # the internal reservoir interface.
+    use_well_mixed_reservoir: bool = False
+    reservoir_offset_layers: int = 1
+
     seed: int = 1
 
 
@@ -165,6 +177,14 @@ class Derived:
     D_m2_s: float
     a_m: float
     open_boundaries: Tuple[str, ...]
+
+    use_well_mixed_reservoir: bool
+    reservoir_offset_layers: int
+    sensor_envelope_z_index: int
+    reservoir_explicit_max_z_index: Optional[int]
+    reservoir_interface_z_m: Optional[float]
+    reservoir_boundary_sites: np.ndarray
+    reservoir_injection_mean: float
 
     face_injection_means: Dict[str, float]
     total_injection_mean: float
@@ -259,7 +279,7 @@ def derive(
     if P.reaction_volume_voxels < 1:
         raise ValueError("reaction_volume_voxels must be at least 1.")
 
-    open_boundaries = _validate_open_boundaries(P.open_boundaries)
+    requested_open_boundaries = _validate_open_boundaries(P.open_boundaries)
 
     if geometry is None:
         geometry = make_flat_geometry(P)
@@ -270,11 +290,95 @@ def derive(
             f"lattice shape {grid_shape}."
         )
 
+    if int(P.reservoir_offset_layers) < 1:
+        raise ValueError("reservoir_offset_layers must be at least 1.")
+
     fluid_mask = ~geometry.solid_mask
-    accessible_fluid_mask = _bulk_accessible_fluid_mask(
+
+    # Determine bulk connectivity before truncating the explicit diffusion
+    # domain. This preserves the existing exclusion of sealed fluid cavities.
+    bulk_accessible_fluid_mask = _bulk_accessible_fluid_mask(
         fluid_mask,
-        open_boundaries,
+        requested_open_boundaries,
     )
+
+    solid_xyz = np.argwhere(geometry.solid_mask)
+    if solid_xyz.size == 0:
+        raise ValueError("The geometry contains no solid sensor sites.")
+
+    sensor_envelope_z_index = int(np.max(solid_xyz[:, 2]))
+    use_well_mixed_reservoir = bool(P.use_well_mixed_reservoir)
+    reservoir_offset_layers = int(P.reservoir_offset_layers)
+
+    reservoir_explicit_max_z_index: Optional[int]
+    reservoir_interface_z_m: Optional[float]
+    reservoir_boundary_sites: np.ndarray
+    reservoir_injection_mean = 0.0
+
+    if use_well_mixed_reservoir:
+        # The upper surface face of the highest solid voxel is located at
+        # (sensor_envelope_z_index + 0.5) * a. offset=1 keeps the fluid node at
+        # envelope+1 explicit and places the reservoir interface at
+        # (envelope+1.5) * a, exactly one lattice spacing above the surface.
+        reservoir_explicit_max_z_index = (
+            sensor_envelope_z_index + reservoir_offset_layers
+        )
+
+        if reservoir_explicit_max_z_index >= Nz:
+            raise ValueError(
+                "The well-mixed reservoir interface must lie inside the "
+                "simulation box. Increase H_m or decrease "
+                "reservoir_offset_layers. "
+                f"Sensor envelope z index={sensor_envelope_z_index}, "
+                f"explicit max z index={reservoir_explicit_max_z_index}, "
+                f"Nz={Nz}."
+            )
+
+        accessible_fluid_mask = bulk_accessible_fluid_mask.copy()
+        accessible_fluid_mask[
+            :,
+            :,
+            reservoir_explicit_max_z_index + 1 :,
+        ] = False
+
+        plane_mask = accessible_fluid_mask[
+            :,
+            :,
+            reservoir_explicit_max_z_index,
+        ]
+        local_xy = np.argwhere(plane_mask).astype(np.int32)
+
+        if local_xy.size == 0:
+            raise ValueError(
+                "No bulk-accessible fluid sites lie on the requested "
+                "well-mixed reservoir interface."
+            )
+
+        reservoir_boundary_sites = np.column_stack(
+            [
+                local_xy[:, 0],
+                local_xy[:, 1],
+                np.full(
+                    local_xy.shape[0],
+                    reservoir_explicit_max_z_index,
+                    dtype=np.int32,
+                ),
+            ]
+        ).astype(np.int32)
+
+        reservoir_interface_z_m = (
+            reservoir_explicit_max_z_index + 0.5
+        ) * P.a_m
+
+        # The internal reservoir replaces exchange at the outer box faces.
+        open_boundaries: Tuple[str, ...] = ()
+    else:
+        accessible_fluid_mask = bulk_accessible_fluid_mask
+        reservoir_explicit_max_z_index = None
+        reservoir_interface_z_m = None
+        reservoir_boundary_sites = np.empty((0, 3), dtype=np.int32)
+        open_boundaries = requested_open_boundaries
+
     accessible_fluid_xyz = np.argwhere(accessible_fluid_mask).astype(np.int32)
 
     if accessible_fluid_xyz.size == 0:
@@ -387,6 +491,10 @@ def derive(
     face_injection_means: Dict[str, float] = {}
     exchange_prefactor = bulk_conc_m3 * P.D_m2_s * dt_s / P.a_m
 
+    if use_well_mixed_reservoir:
+        reservoir_area_m2 = reservoir_boundary_sites.shape[0] * P.a_m**2
+        reservoir_injection_mean = exchange_prefactor * reservoir_area_m2
+
     for face in BOUNDARY_FACES:
         if face in open_boundaries:
             sites = _boundary_sites(accessible_fluid_mask, face)
@@ -397,7 +505,11 @@ def derive(
         boundary_area_m2 = sites.shape[0] * P.a_m**2
         face_injection_means[face] = exchange_prefactor * boundary_area_m2
 
-    total_injection_mean = float(sum(face_injection_means.values()))
+    total_injection_mean = (
+        float(reservoir_injection_mean)
+        if use_well_mixed_reservoir
+        else float(sum(face_injection_means.values()))
+    )
 
     return Derived(
         Nx=Nx,
@@ -419,6 +531,13 @@ def derive(
         D_m2_s=P.D_m2_s,
         a_m=P.a_m,
         open_boundaries=open_boundaries,
+        use_well_mixed_reservoir=use_well_mixed_reservoir,
+        reservoir_offset_layers=reservoir_offset_layers,
+        sensor_envelope_z_index=sensor_envelope_z_index,
+        reservoir_explicit_max_z_index=reservoir_explicit_max_z_index,
+        reservoir_interface_z_m=reservoir_interface_z_m,
+        reservoir_boundary_sites=reservoir_boundary_sites,
+        reservoir_injection_mean=float(reservoir_injection_mean),
         face_injection_means=face_injection_means,
         total_injection_mean=total_injection_mean,
         dt_s=dt_s,
@@ -447,8 +566,11 @@ def _initial_event_counts() -> Dict[str, int]:
         "cross_rebindings": 0,
         "local_rebinding_escapes": 0,
         "rebind_watch_bulk_losses": 0,
+        "rebind_watch_well_mixed_bulk_losses": 0,
         "lost_to_bulk": 0,
         "entered_from_bulk": 0,
+        "lost_to_well_mixed_bulk": 0,
+        "entered_from_well_mixed_bulk": 0,
     }
 
     for face in BOUNDARY_FACES:
@@ -1006,6 +1128,17 @@ def _snapshot_with_phase(
             "phase_k_on_M_inv_s": float(P.k_on_M_inv_s),
             "phase_k_off_s": float(P.k_off_s),
             "phase_dt_s": float(G.dt_s),
+            "phase_use_well_mixed_reservoir": bool(
+                G.use_well_mixed_reservoir
+            ),
+            "phase_reservoir_offset_layers": int(
+                G.reservoir_offset_layers
+            ),
+            "phase_reservoir_interface_z_m": (
+                float(G.reservoir_interface_z_m)
+                if G.reservoir_interface_z_m is not None
+                else np.nan
+            ),
         }
     )
     return row
@@ -1184,6 +1317,57 @@ def register_entry_counts(S: State, counts: Dict[str, int]) -> None:
 
     for face in BOUNDARY_FACES:
         S.event_counts[f"entered_{face}"] += int(counts[face])
+
+
+def add_ligands_from_well_mixed_bulk(
+    S: State,
+    G: Derived,
+    force_at_least_one: bool = False,
+) -> int:
+    """Inject ligands through the internal constant-concentration reservoir."""
+    if not G.use_well_mixed_reservoir:
+        return 0
+
+    mean = float(G.reservoir_injection_mean)
+    if mean <= 0 or G.reservoir_boundary_sites.shape[0] == 0:
+        return 0
+
+    if force_at_least_one:
+        n_new = _sample_zero_truncated_poisson(S.rng, mean)
+    else:
+        n_new = int(S.rng.poisson(mean))
+
+    if n_new <= 0:
+        return 0
+
+    selected = S.rng.integers(
+        0,
+        G.reservoir_boundary_sites.shape[0],
+        size=n_new,
+    )
+    xyz_new = G.reservoir_boundary_sites[selected].copy()
+    _append_new_ligand_arrays(S, xyz_new)
+    return n_new
+
+
+def register_well_mixed_entry_count(S: State, n_enter: int) -> None:
+    """Register entries through the internal well-mixed interface."""
+    n_enter = int(n_enter)
+    if n_enter <= 0:
+        return
+
+    S.event_counts["entered_from_bulk"] += n_enter
+    S.event_counts["entered_from_well_mixed_bulk"] += n_enter
+
+
+def _add_ligands_from_active_reservoir(S: State, G: Derived) -> None:
+    """Inject from the selected bulk-exchange model."""
+    if G.use_well_mixed_reservoir:
+        n_enter = add_ligands_from_well_mixed_bulk(S, G)
+        register_well_mixed_entry_count(S, n_enter)
+    else:
+        entered_counts = add_ligands_from_bulk(S, G)
+        register_entry_counts(S, entered_counts)
 
 
 # -----------------------------------------------------------------------------
@@ -1478,8 +1662,17 @@ def snapshot(S: State, G: Derived) -> Dict[str, float]:
         "rebind_watch_bulk_losses_total": int(
             S.event_counts["rebind_watch_bulk_losses"]
         ),
+        "rebind_watch_well_mixed_bulk_losses_total": int(
+            S.event_counts["rebind_watch_well_mixed_bulk_losses"]
+        ),
         "lost_to_bulk_total": int(S.event_counts["lost_to_bulk"]),
         "entered_from_bulk_total": int(S.event_counts["entered_from_bulk"]),
+        "lost_to_well_mixed_bulk_total": int(
+            S.event_counts["lost_to_well_mixed_bulk"]
+        ),
+        "entered_from_well_mixed_bulk_total": int(
+            S.event_counts["entered_from_well_mixed_bulk"]
+        ),
         **{
             f"lost_{face}_total": int(S.event_counts[f"lost_{face}"])
             for face in BOUNDARY_FACES
@@ -1525,25 +1718,61 @@ def _diffuse_free_ligands(S: State, G: Derived, event_time_s: float) -> None:
     proposed = old_positions + MOVE_VECTORS[moves]
 
     lost_by_face: Dict[str, List[int]] = {face: [] for face in BOUNDARY_FACES}
+    lost_to_well_mixed_bulk: List[int] = []
 
     for local_index, ligand_id in enumerate(free_ids):
         proposed_xyz = proposed[local_index]
+
+        # Once a free ligand crosses upward into the well-mixed bulk it leaves
+        # the explicit microscopic domain and cannot return.
+        if (
+            G.use_well_mixed_reservoir
+            and G.reservoir_explicit_max_z_index is not None
+            and proposed_xyz[2] > G.reservoir_explicit_max_z_index
+        ):
+            S.ligand_xyz[ligand_id] = proposed_xyz
+            lost_to_well_mixed_bulk.append(int(ligand_id))
+            continue
+
         face = _outside_face(proposed_xyz, G)
 
         if face is not None:
             if face in G.open_boundaries:
                 S.ligand_xyz[ligand_id] = proposed_xyz
                 lost_by_face[face].append(int(ligand_id))
-            # Closed outer boundaries are reflecting: leave position unchanged.
             continue
 
         x, y, z = map(int, proposed_xyz)
 
+        if not G.accessible_fluid_mask[x, y, z]:
+            continue
+
         if G.geometry.solid_mask[x, y, z]:
-            # Reflecting sensor boundary.
             continue
 
         S.ligand_xyz[ligand_id] = proposed_xyz
+
+    if lost_to_well_mixed_bulk:
+        ids_array = np.asarray(lost_to_well_mixed_bulk, dtype=np.int64)
+        watched_ids = ids_array[S.rebind_watch_active[ids_array]]
+
+        for ligand_id in watched_ids:
+            _finish_rebinding_watch(
+                S,
+                G,
+                int(ligand_id),
+                outcome="well_mixed_bulk_loss",
+                event_time_s=event_time_s,
+            )
+
+        n_watched = int(watched_ids.size)
+        n_lost = int(ids_array.size)
+
+        S.event_counts["rebind_watch_well_mixed_bulk_losses"] += n_watched
+        S.event_counts["rebind_watch_bulk_losses"] += n_watched
+        S.event_counts["lost_to_well_mixed_bulk"] += n_lost
+        S.event_counts["lost_to_bulk"] += n_lost
+        S.ligand_active[ids_array] = False
 
     all_lost: List[int] = []
 
@@ -1746,8 +1975,7 @@ def step(S: State, G: Derived) -> None:
     bound_receptors_start = np.flatnonzero(S.receptor_ligand >= 0)
 
     if state_is_empty(S):
-        entered_counts = add_ligands_from_bulk(S, G)
-        register_entry_counts(S, entered_counts)
+        _add_ligands_from_active_reservoir(S, G)
         S.step_count += 1
         S.t_s = event_time_s
         return
@@ -1761,8 +1989,7 @@ def step(S: State, G: Derived) -> None:
         event_time_s,
     )
 
-    entered_counts = add_ligands_from_bulk(S, G)
-    register_entry_counts(S, entered_counts)
+    _add_ligands_from_active_reservoir(S, G)
 
     S.step_count += 1
     S.t_s = event_time_s
@@ -1817,6 +2044,13 @@ def capture_state_frame(
         "N_total_ligands_ever": int(S.n_ligands_created),
         "N_open_rebinding_watches": int(
             np.count_nonzero(S.rebind_watch_active)
+        ),
+        "use_well_mixed_reservoir": bool(G.use_well_mixed_reservoir),
+        "reservoir_offset_layers": int(G.reservoir_offset_layers),
+        "reservoir_interface_z_m": (
+            float(G.reservoir_interface_z_m)
+            if G.reservoir_interface_z_m is not None
+            else np.nan
         ),
     }
 
@@ -1956,6 +2190,16 @@ def run_simulation(
         print(f"Bulk concentration   : {G.bulk_conc_m3:.3e} molecules/m^3")
         print(f"D                    : {G.D_m2_s:.3e} m^2/s")
         print(f"Mean bulk entries    : {G.total_injection_mean:.3e} ligands/step")
+        print(f"Well-mixed reservoir : {G.use_well_mixed_reservoir}")
+        if G.use_well_mixed_reservoir:
+            print(
+                f"Reservoir interface  : {G.reservoir_interface_z_m:.3e} m "
+                f"(offset={G.reservoir_offset_layers} layer(s))"
+            )
+            print(
+                f"Reservoir sites      : "
+                f"{G.reservoir_boundary_sites.shape[0]:,}"
+            )
         print(f"Receptor density     : {P.receptor_density_m2:.3e} receptors/m^2")
         print(f"Ligand concentration : {P.ligand_conc_M:.3e} M")
         print(f"KD                   : {G.Kd_M:.3e} M")
@@ -2174,5 +2418,6 @@ __all__ = [
     "state_from_checkpoint",
     "clone_state",
     "rebinding_events_dataframe",
+    "add_ligands_from_well_mixed_bulk",
     "run_simulation",
 ]
