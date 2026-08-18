@@ -23,7 +23,7 @@ PROJECT_DIR="/home/rnt2664/SensorModeling"
 # Quest conda environment.
 CONDA_ENV="sensor-modeling-env"
 
-PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/run_nanopore_height_sweep_wm.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/nanopore_height_sweep_wm.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/nanoporous_base_params.json"
 OUTPUT_ROOT="${PROJECT_DIR}/results/260817_nanopore_height_sweep_wm"
 

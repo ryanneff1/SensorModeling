@@ -15,9 +15,9 @@ set -euo pipefail
 
 PROJECT_DIR="/home/rnt2664/SensorModeling"
 CONDA_ENV="sensor-modeling-env"
-PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/run_nanopore_concentration_sweep_wm.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/nanopore_concentration_sweep_wm.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/nanoporous_base_params.json"
-OUTPUT_ROOT="${PROJECT_DIR}/results/260818_nanopore_concentration_sweep_wm"
+OUTPUT_ROOT="${PROJECT_DIR}/results/260817_nanopore_concentration_sweep_wm"
 
 CONCENTRATIONS_M=(10e-12 100e-12 1e-9 10e-9 100e-9)
 

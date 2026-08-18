@@ -15,9 +15,9 @@ set -euo pipefail
 
 PROJECT_DIR="/home/rnt2664/SensorModeling"
 CONDA_ENV="sensor-modeling-env"
-PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/run_planar_receptor_density_sweep_wm.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/planar_receptor_density_sweep_wm.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/soloNanopore_base_params.json"
-OUTPUT_ROOT="${PROJECT_DIR}/results/260818_planar_receptor_density_sweep_wm"
+OUTPUT_ROOT="${PROJECT_DIR}/results/260817_planar_receptor_density_sweep_wm"
 
 # receptors / m^2
 RECEPTOR_DENSITIES_M2=(5e13 1e14 5e14 1e15 5e15 1e16)
