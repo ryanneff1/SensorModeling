@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 #SBATCH --account=b53010
 #SBATCH --partition=buyin
 #SBATCH --time=48:00:00
