@@ -84,6 +84,15 @@ def load_geometry_json(path: str | Path) -> Tuple[Dict[str, Any], str, List[Any]
     }
 
     # JSON stores tuples as lists.
+
+    # Treat JSON null as "use the geometry generator's default value".
+    geometry = {
+        key: value
+        for key, value in geometry.items()
+        if value is not None
+    }
+
+    # JSON stores tuples as lists.
     if "branch_origin_fraction_range" in geometry:
         geometry["branch_origin_fraction_range"] = tuple(
             geometry["branch_origin_fraction_range"]
