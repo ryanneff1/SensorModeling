@@ -19,7 +19,7 @@ PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/run_nanopore_concentration_sweep_
 PARAMS_JSON="${PROJECT_DIR}/configs/nanoporous_base_params.json"
 OUTPUT_ROOT="${PROJECT_DIR}/results/260818_nanopore_concentration_sweep_wm"
 
-CONCENTRATIONS_M=(100e-12 500e-12 1e-9 10e-9 100e-9)
+CONCENTRATIONS_M=(10e-12 100e-12 1e-9 10e-9 100e-9)
 
 DIAMETER_NM=40
 HEIGHT_NM=100
