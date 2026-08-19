@@ -1,4 +1,5 @@
 /data
 /results
 /analysis_tools
+/utils/__pycache__
 run_biosensor_mc.ipynb
