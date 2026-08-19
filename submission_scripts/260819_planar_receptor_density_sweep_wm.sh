@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
 #SBATCH --mem-per-cpu=4G
-#SBATCH --job-name=260818_planar_receptor_density_sweep_wm
+#SBATCH --job-name=260819_planar_receptor_density_sweep_wm
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
 #SBATCH --mail-type=ALL
@@ -17,10 +17,10 @@ PROJECT_DIR="/home/rnt2664/SensorModeling"
 CONDA_ENV="sensor-modeling-env"
 PYTHON_SCRIPT="${PROJECT_DIR}/protocol_scripts/planar_receptor_density_sweep_wm.py"
 PARAMS_JSON="${PROJECT_DIR}/configs/planar_base_params.json"
-OUTPUT_ROOT="${PROJECT_DIR}/results/260817_planar_receptor_density_sweep_wm"
+OUTPUT_ROOT="${PROJECT_DIR}/results/260819_planar_receptor_density_sweep_wm"
 
 # receptors / m^2
-RECEPTOR_DENSITIES_M2=(5e13 1e14 5e14 1e15 5e15 1e16)
+RECEPTOR_DENSITIES_M2=(1e14 5e14 1e15 5e15 1e16 4e16)
 SURFACE_Z_M=0
 
 N_REPLICATES=5
