@@ -1,0 +1,20 @@
+{
+  "Lx_m": 0.25e-6,
+  "Ly_m": 0.25e-6,
+  "H_m": 0.25e-6,
+  "a_m": 5e-9,
+  "D_m2_s": 1e-11,
+  "receptor_density_m2": 5e15,
+  "receptor_count_override": null,
+  "ligand_conc_M": 10e-9,
+  "k_on_M_inv_s": 1e6,
+  "k_off_s": 1e-1,
+  "dt_s": null,
+  "reaction_volume_voxels": 1,
+  "escape_distance_m": 1e-6,
+  "escape_height_m": 1e-6,
+  "use_poisson_ligand_count": true,
+  "allow_multiple_receptors_per_site": false,
+  "open_boundaries": ["x_min", "x_max", "y_min", "y_max", "z_max"],
+  "seed": 1
+}

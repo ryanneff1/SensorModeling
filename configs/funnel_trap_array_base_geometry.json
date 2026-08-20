@@ -1,0 +1,17 @@
+{
+  "geometry_type": "funnel_trap_array",
+  "geometry": {
+    "surface_z_m": 150e-9,
+    "cavity_radius_m": 25e-9,
+    "funnel_depth_m": 20e-9,
+    "funnel_mouth_radius_m": 25e-9,
+    "funnel_throat_radius_m": 10e-9,
+    "pitch_m": 60e-9,
+    "throat_length_m": 30e-9,
+    "cavity_overlap_m": null,
+    "layout": "square",
+    "edge_margin_m": null,
+    "reactive_region": "all",
+    "name": "funnel_trap_array"
+  }
+}

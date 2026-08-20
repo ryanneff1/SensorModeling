@@ -878,8 +878,8 @@ def make_dendritic_nanospike_geometry(
         min_primary_spacing_m = 2.0 * float(primary_base_radius_mean_m)
     if edge_margin_m is None:
         edge_margin_m = max(
-            1.5 * float(primary_base_radius_mean_m),
-            0.15 * float(primary_height_mean_m),
+            2.0 * float(primary_base_radius_mean_m),
+            0.20 * float(primary_height_mean_m),
         )
 
     if primary_tip_radius_mean_m < 0.5 * P.a_m:
@@ -1065,6 +1065,950 @@ def make_dendritic_nanospike_geometry(
     geometry.roughness_factor = float(roughness_factor)
 
     return geometry
+
+
+
+def make_funnel_trap_geometry(
+    P: Params,
+    surface_z_m: float,
+    cavity_radius_m: float,
+    funnel_depth_m: float,
+    funnel_mouth_radius_m: float,
+    funnel_throat_radius_m: float,
+    center_xy_m: Optional[Tuple[float, float]] = None,
+    cavity_overlap_m: Optional[float] = None,
+    throat_length_m: float = 0.0,
+    reactive_region: str = "all",
+    name: str = "funnel_trap",
+) -> SensorGeometry:
+    """
+    Construct a planar sensor containing a funnel connected to a spherical cavity.
+
+    The sensor is a solid slab occupying z <= ``surface_z_m``. A fluid-accessible
+    trap is carved into the slab:
+
+        external bulk
+              |
+        wide funnel mouth
+            \\   /
+             \\ /
+              |       narrow throat
+           .-----.
+         .'       '.
+        / spherical \
+       |   cavity    |
+        \\           /
+         '---------'
+
+    The funnel is a conical frustum whose radius decreases from
+    ``funnel_mouth_radius_m`` at the planar surface to
+    ``funnel_throat_radius_m`` at depth ``funnel_depth_m``. The spherical cavity
+    is placed directly below the funnel and overlaps it slightly so the voxelized
+    fluid space remains connected.
+
+    This geometry is particularly useful with ``use_well_mixed_reservoir=True``:
+    the global solid envelope remains the planar surface at ``surface_z_m``, so
+    the well-mixed reservoir is placed above the plane while diffusion through
+    the funnel, throat, and cavity remains explicit.
+
+    Parameters
+    ----------
+    P : Params
+        Simulation parameters.
+
+    surface_z_m : float
+        Height of the planar sensor surface. The gold slab occupies lattice sites
+        at or below this height.
+
+    cavity_radius_m : float
+        Radius of the spherical fluid cavity.
+
+    funnel_depth_m : float
+        Vertical distance from the planar surface to the bottom of the conical
+        funnel / top of the optional cylindrical throat.
+
+    funnel_mouth_radius_m : float
+        Funnel radius at the planar surface.
+
+    funnel_throat_radius_m : float
+        Funnel radius at its narrow end.
+
+    center_xy_m : (float, float) or None
+        Lateral center of the trap. If None, use the center of the simulation
+        domain.
+
+    cavity_overlap_m : float or None
+        Overlap between the spherical cavity and the lower end of the throat.
+        This prevents loss of connectivity due to voxelization. If None, use
+        one lattice spacing.
+
+    throat_length_m : float
+        Optional cylindrical narrow-neck length between the funnel and sphere.
+        Increasing this strongly suppresses escape from the cavity.
+
+    reactive_region : {"all", "trap_only"}
+        ``"all"``:
+            Every exposed gold face is reactive, including the surrounding
+            planar surface.
+
+        ``"trap_only"``:
+            Receptors are restricted approximately to gold voxels bordering the
+            funnel/throat/cavity region. This is useful for isolating confinement
+            and rebinding inside the trap.
+
+    name : str
+        Geometry name.
+
+    Returns
+    -------
+    SensorGeometry
+        Geometry compatible with derive(), run_simulation(), receptor placement,
+        rebinding analysis, and the well-mixed-reservoir model.
+
+    Notes
+    -----
+    The physical sphere and funnel are rasterized onto the lattice. Feature
+    dimensions should generally span several lattice spacings.
+
+    For a strong entropic/first-passage trap, the most influential ratios are
+
+        funnel_throat_radius_m / cavity_radius_m
+
+    and
+
+        throat_length_m / funnel_throat_radius_m.
+
+    A small throat connected to a much larger cavity gives a ligand many more
+    possible diffusive states inside the cavity than states that lead directly
+    back through the exit.
+    """
+    Nx, Ny, Nz = _grid_counts(P)
+    shape = (Nx, Ny, Nz + 1)
+
+    surface_z_m = float(surface_z_m)
+    cavity_radius_m = float(cavity_radius_m)
+    funnel_depth_m = float(funnel_depth_m)
+    funnel_mouth_radius_m = float(funnel_mouth_radius_m)
+    funnel_throat_radius_m = float(funnel_throat_radius_m)
+    throat_length_m = float(throat_length_m)
+
+    if not (0.0 <= surface_z_m < P.H_m):
+        raise ValueError(
+            "surface_z_m must satisfy 0 <= surface_z_m < P.H_m."
+        )
+
+    for parameter_name, value in {
+        "cavity_radius_m": cavity_radius_m,
+        "funnel_depth_m": funnel_depth_m,
+        "funnel_mouth_radius_m": funnel_mouth_radius_m,
+        "funnel_throat_radius_m": funnel_throat_radius_m,
+    }.items():
+        if value <= 0:
+            raise ValueError(f"{parameter_name} must be positive.")
+
+    if throat_length_m < 0:
+        raise ValueError("throat_length_m cannot be negative.")
+
+    if funnel_throat_radius_m > funnel_mouth_radius_m:
+        raise ValueError(
+            "funnel_throat_radius_m must be <= funnel_mouth_radius_m."
+        )
+
+    if funnel_depth_m >= surface_z_m:
+        raise ValueError(
+            "funnel_depth_m must be smaller than surface_z_m so the funnel "
+            "remains inside the solid slab above z=0."
+        )
+
+    if reactive_region not in {"all", "trap_only"}:
+        raise ValueError(
+            "reactive_region must be either 'all' or 'trap_only'."
+        )
+
+    if center_xy_m is None:
+        center_x_m = 0.5 * (Nx - 1) * P.a_m
+        center_y_m = 0.5 * (Ny - 1) * P.a_m
+    else:
+        center_x_m = float(center_xy_m[0])
+        center_y_m = float(center_xy_m[1])
+
+    if cavity_overlap_m is None:
+        cavity_overlap_m = P.a_m
+    cavity_overlap_m = float(cavity_overlap_m)
+
+    if cavity_overlap_m < 0:
+        raise ValueError("cavity_overlap_m cannot be negative.")
+
+    # Funnel runs from the planar surface down to funnel_bottom_z.
+    funnel_bottom_z_m = surface_z_m - funnel_depth_m
+
+    # Optional narrow cylindrical throat continues below the funnel.
+    throat_bottom_z_m = funnel_bottom_z_m - throat_length_m
+
+    # Place the sphere so its top overlaps the bottom of the throat.
+    cavity_center_z_m = (
+        throat_bottom_z_m
+        - cavity_radius_m
+        + cavity_overlap_m
+    )
+
+    cavity_bottom_z_m = (
+        cavity_center_z_m
+        - cavity_radius_m
+    )
+
+    if cavity_bottom_z_m < 0:
+        raise ValueError(
+            "The spherical cavity would extend below z=0. Increase "
+            "surface_z_m, reduce funnel_depth_m/throat_length_m/cavity radius, "
+            "or otherwise increase the slab thickness."
+        )
+
+    # Keep the widest part of the trap away from the lateral domain edges.
+    lateral_extent = max(
+        funnel_mouth_radius_m,
+        cavity_radius_m,
+    )
+
+    x_max_m = (Nx - 1) * P.a_m
+    y_max_m = (Ny - 1) * P.a_m
+
+    if not (
+        lateral_extent <= center_x_m <= x_max_m - lateral_extent
+        and lateral_extent <= center_y_m <= y_max_m - lateral_extent
+    ):
+        raise ValueError(
+            "The funnel/cavity does not fit laterally inside the simulation "
+            "domain. Move center_xy_m inward or reduce the trap dimensions."
+        )
+
+    # ------------------------------------------------------------------
+    # Build the initial planar solid slab.
+    # ------------------------------------------------------------------
+    x_m = np.arange(Nx, dtype=float) * P.a_m
+    y_m = np.arange(Ny, dtype=float) * P.a_m
+    z_m = np.arange(Nz + 1, dtype=float) * P.a_m
+
+    X, Y, Z = np.meshgrid(
+        x_m,
+        y_m,
+        z_m,
+        indexing="ij",
+    )
+
+    tolerance = 1e-12 * P.a_m
+
+    solid_mask = (
+        Z <= surface_z_m + tolerance
+    )
+
+    radial_distance_m = np.sqrt(
+        (X - center_x_m) ** 2
+        + (Y - center_y_m) ** 2
+    )
+
+    # ------------------------------------------------------------------
+    # Carve the conical funnel.
+    #
+    # u = 0 at the wide planar mouth
+    # u = 1 at the narrow lower end
+    # ------------------------------------------------------------------
+    in_funnel_z = (
+        (Z <= surface_z_m + tolerance)
+        & (Z >= funnel_bottom_z_m - tolerance)
+    )
+
+    u = np.clip(
+        (surface_z_m - Z)
+        / funnel_depth_m,
+        0.0,
+        1.0,
+    )
+
+    funnel_radius_at_z_m = (
+        funnel_mouth_radius_m
+        + u * (
+            funnel_throat_radius_m
+            - funnel_mouth_radius_m
+        )
+    )
+
+    funnel_void = (
+        in_funnel_z
+        & (
+            radial_distance_m
+            <= funnel_radius_at_z_m + tolerance
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # Carve the optional cylindrical throat.
+    # ------------------------------------------------------------------
+    if throat_length_m > 0:
+        throat_void = (
+            (Z <= funnel_bottom_z_m + tolerance)
+            & (Z >= throat_bottom_z_m - tolerance)
+            & (
+                radial_distance_m
+                <= funnel_throat_radius_m + tolerance
+            )
+        )
+    else:
+        throat_void = np.zeros(
+            shape,
+            dtype=bool,
+        )
+
+    # ------------------------------------------------------------------
+    # Carve the spherical cavity.
+    # ------------------------------------------------------------------
+    cavity_distance_squared_m2 = (
+        (X - center_x_m) ** 2
+        + (Y - center_y_m) ** 2
+        + (Z - cavity_center_z_m) ** 2
+    )
+
+    cavity_void = (
+        cavity_distance_squared_m2
+        <= cavity_radius_m**2 + tolerance
+    )
+
+    trap_void = (
+        funnel_void
+        | throat_void
+        | cavity_void
+    )
+
+    solid_mask = (
+        solid_mask
+        & ~trap_void
+    )
+
+    # ------------------------------------------------------------------
+    # Optionally restrict receptor placement to the trap neighborhood.
+    #
+    # geometry_from_solid_mask() accepts a solid-site-level reactive mask,
+    # so we mark solid voxels close to the carved trap void. This selects
+    # funnel, throat, and cavity walls while suppressing most of the external
+    # planar surface.
+    # ------------------------------------------------------------------
+    if reactive_region == "all":
+        reactive_solid_mask = None
+
+    else:
+        # Mark solid voxels that are face-adjacent to any trap-void voxel.
+        trap_neighbor = np.zeros(
+            shape,
+            dtype=bool,
+        )
+
+        for direction in FACE_DIRECTIONS:
+            dx, dy, dz = direction
+
+            src_x = slice(
+                max(0, -dx),
+                min(Nx, Nx - dx),
+            )
+            src_y = slice(
+                max(0, -dy),
+                min(Ny, Ny - dy),
+            )
+            src_z = slice(
+                max(0, -dz),
+                min(Nz + 1, Nz + 1 - dz),
+            )
+
+            dst_x = slice(
+                max(0, dx),
+                min(Nx, Nx + dx),
+            )
+            dst_y = slice(
+                max(0, dy),
+                min(Ny, Ny + dy),
+            )
+            dst_z = slice(
+                max(0, dz),
+                min(Nz + 1, Nz + 1 + dz),
+            )
+
+            trap_neighbor[dst_x, dst_y, dst_z] |= (
+                trap_void[src_x, src_y, src_z]
+            )
+
+        reactive_solid_mask = (
+            solid_mask
+            & trap_neighbor
+        )
+
+    geometry = geometry_from_solid_mask(
+        P,
+        solid_mask,
+        name=name,
+        reactive_solid_mask=reactive_solid_mask,
+    )
+
+    # ------------------------------------------------------------------
+    # Metadata for visualization and parameter sweeps.
+    # ------------------------------------------------------------------
+    geometry.funnel_trap_center_xy_m = (
+        float(center_x_m),
+        float(center_y_m),
+    )
+    geometry.funnel_trap_surface_z_m = (
+        surface_z_m
+    )
+    geometry.funnel_trap_cavity_radius_m = (
+        cavity_radius_m
+    )
+    geometry.funnel_trap_cavity_center_z_m = (
+        float(cavity_center_z_m)
+    )
+    geometry.funnel_trap_cavity_bottom_z_m = (
+        float(cavity_bottom_z_m)
+    )
+    geometry.funnel_trap_funnel_depth_m = (
+        funnel_depth_m
+    )
+    geometry.funnel_trap_funnel_mouth_radius_m = (
+        funnel_mouth_radius_m
+    )
+    geometry.funnel_trap_funnel_throat_radius_m = (
+        funnel_throat_radius_m
+    )
+    geometry.funnel_trap_funnel_bottom_z_m = (
+        float(funnel_bottom_z_m)
+    )
+    geometry.funnel_trap_throat_length_m = (
+        throat_length_m
+    )
+    geometry.funnel_trap_throat_bottom_z_m = (
+        float(throat_bottom_z_m)
+    )
+    geometry.funnel_trap_cavity_overlap_m = (
+        cavity_overlap_m
+    )
+    geometry.funnel_trap_reactive_region = (
+        reactive_region
+    )
+
+    geometry.funnel_trap_void_voxel_count = int(
+        np.count_nonzero(trap_void)
+    )
+    geometry.funnel_trap_cavity_voxel_count = int(
+        np.count_nonzero(cavity_void)
+    )
+    geometry.funnel_trap_funnel_voxel_count = int(
+        np.count_nonzero(funnel_void)
+    )
+    geometry.funnel_trap_throat_voxel_count = int(
+        np.count_nonzero(throat_void)
+    )
+
+    # Useful nondimensional trapping descriptors.
+    geometry.funnel_trap_throat_to_cavity_ratio = float(
+        funnel_throat_radius_m
+        / cavity_radius_m
+    )
+    geometry.funnel_trap_mouth_to_throat_ratio = float(
+        funnel_mouth_radius_m
+        / funnel_throat_radius_m
+    )
+    geometry.funnel_trap_throat_aspect_ratio = float(
+        throat_length_m
+        / funnel_throat_radius_m
+        if funnel_throat_radius_m > 0
+        else np.nan
+    )
+
+    return geometry
+
+
+
+
+def make_funnel_trap_array_geometry(
+    P: Params,
+    surface_z_m: float,
+    cavity_radius_m: float,
+    funnel_depth_m: float,
+    funnel_mouth_radius_m: float,
+    funnel_throat_radius_m: float,
+    pitch_m: float,
+    throat_length_m: float = 0.0,
+    cavity_overlap_m: Optional[float] = None,
+    layout: str = "square",
+    edge_margin_m: Optional[float] = None,
+    reactive_region: str = "all",
+    name: str = "funnel_trap_array",
+) -> SensorGeometry:
+    """
+    Construct an array of funnel traps beneath a planar sensor surface.
+
+    Each trap consists of a conical funnel connected through an optional
+    cylindrical throat to a spherical cavity. The traps are carved as fluid
+    voids into a common solid slab.
+
+    This constructor is designed to be directly comparable with
+    ``make_nanopore_array_geometry``. In particular, ``pitch_m`` and ``layout``
+    have the same meaning, and ``2 * funnel_mouth_radius_m`` can be matched to
+    ``pore_diameter_m`` when comparing projected openings.
+
+    Parameters
+    ----------
+    P : Params
+        Simulation parameters.
+
+    surface_z_m : float
+        Height of the planar sensor surface. The solid slab occupies lattice
+        sites at or below this height.
+
+    cavity_radius_m : float
+        Radius of each spherical cavity.
+
+    funnel_depth_m : float
+        Vertical depth of each conical funnel from the planar surface to its
+        narrow end.
+
+    funnel_mouth_radius_m : float
+        Radius of each funnel opening at the planar surface.
+
+    funnel_throat_radius_m : float
+        Radius at the narrow end of each funnel.
+
+    pitch_m : float
+        Center-to-center spacing between neighboring traps.
+
+    throat_length_m : float
+        Length of the optional cylindrical narrow throat between funnel and
+        spherical cavity.
+
+    cavity_overlap_m : float or None
+        Overlap between the spherical cavity and the lower end of the throat.
+        If None, defaults to one lattice spacing to preserve voxel connectivity.
+
+    layout : {"square", "hexagonal", "hex"}
+        Lateral arrangement of trap centers.
+
+    edge_margin_m : float or None
+        Minimum center-to-edge margin. If None, defaults to the largest lateral
+        trap radius so cavities/openings remain inside the side boundaries.
+
+    reactive_region : {"all", "trap_only"}
+        ``"all"`` makes every exposed gold face reactive.
+        ``"trap_only"`` restricts receptor placement to solid voxels adjacent
+        to funnel/throat/cavity voids.
+
+    name : str
+        Geometry name.
+
+    Returns
+    -------
+    SensorGeometry
+        Voxelized funnel-trap array geometry.
+
+    Notes
+    -----
+    With the well-mixed reservoir enabled, the reservoir remains above the
+    global planar sensor envelope. Transport inside every funnel, throat, and
+    cavity remains explicitly diffusion dominated.
+
+    For a matched comparison to a nanopore array, useful choices are
+
+        pore_diameter_m = 2 * funnel_mouth_radius_m
+        nanopore pitch_m = funnel-trap pitch_m
+
+    while varying the hidden cavity/throat geometry independently.
+    """
+    Nx, Ny, Nz = _grid_counts(P)
+    shape = (Nx, Ny, Nz + 1)
+
+    surface_z_m = float(surface_z_m)
+    cavity_radius_m = float(cavity_radius_m)
+    funnel_depth_m = float(funnel_depth_m)
+    funnel_mouth_radius_m = float(funnel_mouth_radius_m)
+    funnel_throat_radius_m = float(funnel_throat_radius_m)
+    pitch_m = float(pitch_m)
+    throat_length_m = float(throat_length_m)
+
+    if not (0.0 <= surface_z_m < P.H_m):
+        raise ValueError(
+            "surface_z_m must satisfy 0 <= surface_z_m < P.H_m."
+        )
+
+    for parameter_name, value in {
+        "cavity_radius_m": cavity_radius_m,
+        "funnel_depth_m": funnel_depth_m,
+        "funnel_mouth_radius_m": funnel_mouth_radius_m,
+        "funnel_throat_radius_m": funnel_throat_radius_m,
+        "pitch_m": pitch_m,
+    }.items():
+        if value <= 0:
+            raise ValueError(f"{parameter_name} must be positive.")
+
+    if throat_length_m < 0:
+        raise ValueError("throat_length_m cannot be negative.")
+
+    if funnel_throat_radius_m > funnel_mouth_radius_m:
+        raise ValueError(
+            "funnel_throat_radius_m must be <= funnel_mouth_radius_m."
+        )
+
+    if funnel_depth_m >= surface_z_m:
+        raise ValueError(
+            "funnel_depth_m must be smaller than surface_z_m."
+        )
+
+    if reactive_region not in {"all", "trap_only"}:
+        raise ValueError(
+            "reactive_region must be either 'all' or 'trap_only'."
+        )
+
+    if cavity_overlap_m is None:
+        cavity_overlap_m = P.a_m
+    cavity_overlap_m = float(cavity_overlap_m)
+
+    if cavity_overlap_m < 0:
+        raise ValueError("cavity_overlap_m cannot be negative.")
+
+    if edge_margin_m is None:
+        edge_margin_m = max(
+            cavity_radius_m,
+            funnel_mouth_radius_m,
+        )
+    edge_margin_m = float(edge_margin_m)
+
+    funnel_bottom_z_m = surface_z_m - funnel_depth_m
+    throat_bottom_z_m = funnel_bottom_z_m - throat_length_m
+    cavity_center_z_m = (
+        throat_bottom_z_m
+        - cavity_radius_m
+        + cavity_overlap_m
+    )
+    cavity_bottom_z_m = cavity_center_z_m - cavity_radius_m
+
+    if cavity_bottom_z_m < 0:
+        raise ValueError(
+            "The spherical cavities would extend below z=0. Increase "
+            "surface_z_m or reduce funnel/cavity/throat dimensions."
+        )
+
+    # Generate trap centers using the same square/hexagonal convention as
+    # make_nanopore_array_geometry().
+    layout = str(layout).lower()
+
+    if layout not in {"square", "hexagonal", "hex"}:
+        raise ValueError(
+            "layout must be 'square', 'hexagonal', or 'hex'."
+        )
+
+    x_max_m = (Nx - 1) * P.a_m
+    y_max_m = (Ny - 1) * P.a_m
+
+    x_min_center = edge_margin_m
+    x_max_center = x_max_m - edge_margin_m
+    y_min_center = edge_margin_m
+    y_max_center = y_max_m - edge_margin_m
+
+    if (
+        x_min_center > x_max_center
+        or y_min_center > y_max_center
+    ):
+        raise ValueError(
+            "The requested edge margin leaves no room for funnel-trap centers."
+        )
+
+    center_list = []
+
+    if layout == "square":
+        x_centers = np.arange(
+            x_min_center,
+            x_max_center + 0.5 * pitch_m,
+            pitch_m,
+        )
+        y_centers = np.arange(
+            y_min_center,
+            y_max_center + 0.5 * pitch_m,
+            pitch_m,
+        )
+
+        for xc in x_centers:
+            for yc in y_centers:
+                center_list.append((xc, yc))
+
+    else:
+        row_spacing_m = pitch_m * np.sqrt(3.0) / 2.0
+
+        y_centers = np.arange(
+            y_min_center,
+            y_max_center + 0.5 * row_spacing_m,
+            row_spacing_m,
+        )
+
+        for row_index, yc in enumerate(y_centers):
+            x_offset = 0.5 * pitch_m if row_index % 2 else 0.0
+
+            x_centers = np.arange(
+                x_min_center + x_offset,
+                x_max_center + 0.5 * pitch_m,
+                pitch_m,
+            )
+
+            for xc in x_centers:
+                if xc <= x_max_center + tolerance:
+                    center_list.append((xc, yc))
+
+    centers_xy_m = np.asarray(
+        center_list,
+        dtype=float,
+    ).reshape(-1, 2)
+
+    if centers_xy_m.size == 0:
+        raise ValueError(
+            "No funnel-trap centers fit inside the requested domain."
+        )
+
+    # Keep the hidden spherical cavities distinct. Allowing cavity overlap
+    # would create a subsurface fluid network and change the intended trap
+    # topology.
+    if pitch_m < 2.0 * cavity_radius_m:
+        raise ValueError(
+            "pitch_m must be at least the spherical cavity diameter "
+            "(2 * cavity_radius_m) so neighboring funnel traps do not merge."
+        )
+
+    x_m = np.arange(Nx, dtype=float) * P.a_m
+    y_m = np.arange(Ny, dtype=float) * P.a_m
+    z_m = np.arange(Nz + 1, dtype=float) * P.a_m
+
+    X, Y, Z = np.meshgrid(
+        x_m,
+        y_m,
+        z_m,
+        indexing="ij",
+    )
+
+    tolerance = 1e-12 * P.a_m
+
+    solid_mask = (
+        Z <= surface_z_m + tolerance
+    )
+
+    all_trap_void = np.zeros(shape, dtype=bool)
+    all_funnel_void = np.zeros(shape, dtype=bool)
+    all_throat_void = np.zeros(shape, dtype=bool)
+    all_cavity_void = np.zeros(shape, dtype=bool)
+
+    in_funnel_z = (
+        (Z <= surface_z_m + tolerance)
+        & (Z >= funnel_bottom_z_m - tolerance)
+    )
+
+    u = np.clip(
+        (surface_z_m - Z) / funnel_depth_m,
+        0.0,
+        1.0,
+    )
+
+    funnel_radius_at_z_m = (
+        funnel_mouth_radius_m
+        + u * (
+            funnel_throat_radius_m
+            - funnel_mouth_radius_m
+        )
+    )
+
+    for center_x_m, center_y_m in centers_xy_m:
+        radial_distance_m = np.sqrt(
+            (X - center_x_m) ** 2
+            + (Y - center_y_m) ** 2
+        )
+
+        funnel_void = (
+            in_funnel_z
+            & (
+                radial_distance_m
+                <= funnel_radius_at_z_m + tolerance
+            )
+        )
+
+        if throat_length_m > 0:
+            throat_void = (
+                (Z <= funnel_bottom_z_m + tolerance)
+                & (Z >= throat_bottom_z_m - tolerance)
+                & (
+                    radial_distance_m
+                    <= funnel_throat_radius_m + tolerance
+                )
+            )
+        else:
+            throat_void = np.zeros(
+                shape,
+                dtype=bool,
+            )
+
+        cavity_distance_squared_m2 = (
+            (X - center_x_m) ** 2
+            + (Y - center_y_m) ** 2
+            + (Z - cavity_center_z_m) ** 2
+        )
+
+        cavity_void = (
+            cavity_distance_squared_m2
+            <= cavity_radius_m**2 + tolerance
+        )
+
+        trap_void = (
+            funnel_void
+            | throat_void
+            | cavity_void
+        )
+
+        all_funnel_void |= funnel_void
+        all_throat_void |= throat_void
+        all_cavity_void |= cavity_void
+        all_trap_void |= trap_void
+
+    solid_mask = (
+        solid_mask
+        & ~all_trap_void
+    )
+
+    if reactive_region == "all":
+        reactive_solid_mask = None
+
+    else:
+        trap_neighbor = np.zeros(
+            shape,
+            dtype=bool,
+        )
+
+        for direction in FACE_DIRECTIONS:
+            dx, dy, dz = direction
+
+            src_x = slice(
+                max(0, -dx),
+                min(Nx, Nx - dx),
+            )
+            src_y = slice(
+                max(0, -dy),
+                min(Ny, Ny - dy),
+            )
+            src_z = slice(
+                max(0, -dz),
+                min(Nz + 1, Nz + 1 - dz),
+            )
+
+            dst_x = slice(
+                max(0, dx),
+                min(Nx, Nx + dx),
+            )
+            dst_y = slice(
+                max(0, dy),
+                min(Ny, Ny + dy),
+            )
+            dst_z = slice(
+                max(0, dz),
+                min(Nz + 1, Nz + 1 + dz),
+            )
+
+            trap_neighbor[
+                dst_x,
+                dst_y,
+                dst_z,
+            ] |= all_trap_void[
+                src_x,
+                src_y,
+                src_z,
+            ]
+
+        reactive_solid_mask = (
+            solid_mask
+            & trap_neighbor
+        )
+
+    geometry = geometry_from_solid_mask(
+        P,
+        solid_mask,
+        name=name,
+        reactive_solid_mask=reactive_solid_mask,
+    )
+
+    geometry.funnel_trap_array_centers_xy_m = np.asarray(
+        centers_xy_m,
+        dtype=float,
+    )
+    geometry.funnel_trap_array_n_traps = int(
+        len(centers_xy_m)
+    )
+    geometry.funnel_trap_array_pitch_m = pitch_m
+    geometry.funnel_trap_array_layout = str(layout)
+    geometry.funnel_trap_array_edge_margin_m = edge_margin_m
+
+    geometry.funnel_trap_surface_z_m = surface_z_m
+    geometry.funnel_trap_cavity_radius_m = cavity_radius_m
+    geometry.funnel_trap_cavity_center_z_m = float(
+        cavity_center_z_m
+    )
+    geometry.funnel_trap_cavity_bottom_z_m = float(
+        cavity_bottom_z_m
+    )
+    geometry.funnel_trap_funnel_depth_m = funnel_depth_m
+    geometry.funnel_trap_funnel_mouth_radius_m = (
+        funnel_mouth_radius_m
+    )
+    geometry.funnel_trap_funnel_throat_radius_m = (
+        funnel_throat_radius_m
+    )
+    geometry.funnel_trap_funnel_bottom_z_m = float(
+        funnel_bottom_z_m
+    )
+    geometry.funnel_trap_throat_length_m = throat_length_m
+    geometry.funnel_trap_throat_bottom_z_m = float(
+        throat_bottom_z_m
+    )
+    geometry.funnel_trap_cavity_overlap_m = cavity_overlap_m
+    geometry.funnel_trap_reactive_region = reactive_region
+
+    geometry.funnel_trap_void_voxel_count = int(
+        np.count_nonzero(all_trap_void)
+    )
+    geometry.funnel_trap_cavity_voxel_count = int(
+        np.count_nonzero(all_cavity_void)
+    )
+    geometry.funnel_trap_funnel_voxel_count = int(
+        np.count_nonzero(all_funnel_void)
+    )
+    geometry.funnel_trap_throat_voxel_count = int(
+        np.count_nonzero(all_throat_void)
+    )
+
+    geometry.funnel_trap_throat_to_cavity_ratio = float(
+        funnel_throat_radius_m
+        / cavity_radius_m
+    )
+    geometry.funnel_trap_mouth_to_throat_ratio = float(
+        funnel_mouth_radius_m
+        / funnel_throat_radius_m
+    )
+    geometry.funnel_trap_throat_aspect_ratio = float(
+        throat_length_m
+        / funnel_throat_radius_m
+        if funnel_throat_radius_m > 0
+        else np.nan
+    )
+
+    geometry.funnel_trap_array_total_mouth_area_m2 = float(
+        len(centers_xy_m)
+        * np.pi
+        * funnel_mouth_radius_m**2
+    )
+
+    geometry.funnel_trap_array_projected_area_fraction = float(
+        geometry.funnel_trap_array_total_mouth_area_m2
+        / (P.Lx_m * P.Ly_m)
+    )
+
+    return geometry
+
 
 
 def make_nanopore_array_geometry(
