@@ -1,7 +1,7 @@
 data
 results
 analysis_tools
-**/__pycache__/
+utils/__pycache__/
 info
 .vscode
 run_biosensor_mc.ipynb
