@@ -30,6 +30,6 @@
   },
   "sweep": {
     "parameter": "branches_per_segment_mean",
-    "values": [1, 1.5, 2, 2.5, 3]
+    "values": [2.5, 3]
   }
 }

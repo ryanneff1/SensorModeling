@@ -30,6 +30,6 @@
   },
   "sweep": {
     "parameter": "spike_density_m2",
-    "values": [1e14, 2.5e14, 5e14, 7.5e14, 1e15]
+    "values": [7.5e14, 1e15]
   }
 }
