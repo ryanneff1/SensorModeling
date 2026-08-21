@@ -1,5 +1,7 @@
-/data
-/results
-/analysis_tools
-/utils/__pycache__
+data
+results
+analysis_tools
+**/__pycache__/
+info
+.vscode
 run_biosensor_mc.ipynb
