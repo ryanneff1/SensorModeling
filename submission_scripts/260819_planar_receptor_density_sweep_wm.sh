@@ -3,7 +3,7 @@
 #SBATCH --partition=buyin
 #SBATCH --time=48:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=16
+#SBATCH --ntasks=32
 #SBATCH --mem-per-cpu=4G
 #SBATCH --job-name=260819_planar_receptor_density_sweep_wm
 #SBATCH --output=slurm-%x-%j.out
@@ -20,7 +20,7 @@ PARAMS_JSON="${PROJECT_DIR}/configs/planar_base_params.json"
 OUTPUT_ROOT="${PROJECT_DIR}/results/260819_planar_receptor_density_sweep_wm"
 
 # receptors / m^2
-RECEPTOR_DENSITIES_M2=(1e14 5e14 1e15 5e15 1e16 4e16)
+RECEPTOR_DENSITIES_M2=(1e14 5e14 1e15 5e15 1e16)
 SURFACE_Z_M=0
 
 N_REPLICATES=5
