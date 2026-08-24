@@ -7,7 +7,7 @@
     "funnel_mouth_radius_m": 25e-9,
     "funnel_throat_radius_m": 10e-9,
     "pitch_m": 60e-9,
-    "throat_length_m": 30e-9,
+    "throat_length_m": 60e-9,
     "cavity_overlap_m": null,
     "layout": "square",
     "edge_margin_m": null,
@@ -18,11 +18,7 @@
     "parameter": "funnel_throat_radius_m",
     "values": [
       5e-9,
-      7.5e-9,
-      10e-9,
-      15e-9,
-      20e-9,
-      25e-9
+      7.5e-9
     ]
   }
 }
