@@ -1,0 +1,10 @@
+{
+  "geometry_type": "spherical_bowl",
+  "geometry": {
+    "radius_m": 25e-9,
+    "depth_m": 25e-9,
+    "center_xy_m": [50e-9, 50e-9],
+    "rim_z_m": 50e-9,
+    "name": "single_spherical_bowl"
+  }
+}

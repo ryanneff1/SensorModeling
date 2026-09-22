@@ -5,3 +5,4 @@ utils/__pycache__/
 info
 .vscode
 run_biosensor_mc.ipynb
+run_escape_assay.ipynb

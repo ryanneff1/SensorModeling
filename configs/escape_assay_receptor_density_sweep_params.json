@@ -1,0 +1,19 @@
+{
+  "sweep": {
+    "parameter": "receptor_density_m2",
+    "values": [
+      7.5e15,
+      1e16,
+      2.5e16,
+      5e16,
+      7.5e16,
+      1e17
+    ]
+  },
+  "assay": {
+    "n_trials_per_location": 20,
+    "max_time_s": 0.25,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9
+  }
+}
