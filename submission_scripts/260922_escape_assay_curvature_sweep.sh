@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --account=b53010
 #SBATCH --partition=buyin
-#SBATCH --time=01:00:00
+#SBATCH --time=10:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=30
+#SBATCH --ntasks=15
 #SBATCH --mem-per-cpu=2G
 #SBATCH --job-name=260922_escape_assay_curvature_sweep
 #SBATCH --output=slurm-%x-%j.out
@@ -23,7 +23,7 @@ OUTPUT_ROOT="${PROJECT_DIR}/results/260922_escape_assay_curvature_sweep"
 
 N_REPLICATES=5
 # Keep this equal to #SBATCH --ntasks. There are 6 radii x 5 replicates.
-N_WORKERS=30
+N_WORKERS=15
 
 unset PYTHONPATH
 unset PYTHONHOME
