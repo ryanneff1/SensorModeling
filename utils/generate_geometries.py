@@ -549,6 +549,276 @@ def make_spherical_bowl_geometry(
     return make_height_field_geometry(P, height, name=name)
 
 
+def make_cylindrical_trough_geometry(
+    P: Params,
+    radius_m: float,
+    depth_m: float,
+    axis: str = "y",
+    center_xy_m: Optional[Tuple[float, float]] = None,
+    rim_z_m: Optional[float] = None,
+    name: str = "cylindrical_trough",
+) -> SensorGeometry:
+    """Construct a concave circular trough extruded along one lateral axis.
+
+    The curved cross-section has one principal curvature of magnitude
+    ``1 / radius_m`` and zero curvature along the extrusion axis. ``axis='y'``
+    varies the surface height across x and extrudes the trough along y;
+    ``axis='x'`` varies height across y and extrudes along x.
+    """
+
+    radius_m = float(radius_m)
+    depth_m = float(depth_m)
+    axis = str(axis).lower()
+    if radius_m <= 0:
+        raise ValueError("radius_m must be positive.")
+    if depth_m <= 0 or depth_m > radius_m:
+        raise ValueError("depth_m must satisfy 0 < depth_m <= radius_m.")
+    if axis not in {"x", "y"}:
+        raise ValueError("axis must be 'x' or 'y'.")
+    if center_xy_m is None:
+        center_xy_m = _default_center_xy(P)
+    if rim_z_m is None:
+        rim_z_m = depth_m
+    rim_z_m = float(rim_z_m)
+    if rim_z_m - depth_m < 0:
+        raise ValueError("rim_z_m must be at least depth_m.")
+    if rim_z_m > P.H_m:
+        raise ValueError("rim_z_m must not exceed P.H_m.")
+
+    xc, yc = map(float, center_xy_m)
+    half_width_m = float(np.sqrt(2 * radius_m * depth_m - depth_m**2))
+    Nx, Ny, _ = _grid_counts(P)
+    perpendicular_center_m = yc if axis == "x" else xc
+    perpendicular_max_m = ((Ny - 1) if axis == "x" else (Nx - 1)) * P.a_m
+    if (
+        perpendicular_center_m - half_width_m < 0
+        or perpendicular_center_m + half_width_m > perpendicular_max_m
+    ):
+        raise ValueError(
+            "The trough cross-section does not fit inside the domain. "
+            "Increase the lateral domain, reduce radius/depth, or move its center."
+        )
+
+    circle_center_z_m = rim_z_m + radius_m - depth_m
+
+    def height(X_m: np.ndarray, Y_m: np.ndarray) -> np.ndarray:
+        coordinate = Y_m - yc if axis == "x" else X_m - xc
+        coordinate_squared = coordinate**2
+        inside = coordinate_squared <= half_width_m**2
+        values = np.full(X_m.shape, rim_z_m, dtype=float)
+        values[inside] = circle_center_z_m - np.sqrt(
+            np.maximum(radius_m**2 - coordinate_squared[inside], 0.0)
+        )
+        return values
+
+    geometry = make_height_field_geometry(P, height, name=name)
+    geometry.trough_radius_m = radius_m
+    geometry.trough_depth_m = depth_m
+    geometry.trough_half_width_m = half_width_m
+    geometry.trough_axis = axis
+    geometry.trough_center_xy_m = (xc, yc)
+    geometry.rim_z_m = rim_z_m
+    geometry.trough_principal_curvature_m_inv = 1.0 / radius_m
+    return geometry
+
+
+def make_cylindrically_curved_sheet_geometry(
+    P: Params,
+    radius_m: float,
+    axis: str = "y",
+    center_xy_m: Optional[Tuple[float, float]] = None,
+    vertex_z_m: float = 0.0,
+    name: str = "cylindrically_curved_sheet",
+) -> SensorGeometry:
+    """Construct a continuous plane bent into a concave cylindrical sheet.
+
+    The complete x-y domain participates in the bend: there is no flat rim or
+    transition region. ``axis='y'`` bends across x while remaining invariant
+    along y, like a sheet rolled around the y axis. ``axis='x'`` bends across
+    y. The lowest line of the sheet lies at ``vertex_z_m`` and its nonzero
+    principal curvature has constant magnitude ``1 / radius_m``.
+
+    The radius must be at least the greatest perpendicular distance from the
+    requested center line to a domain edge. The resulting edge height must fit
+    below ``P.H_m``.
+    """
+
+    radius_m = float(radius_m)
+    vertex_z_m = float(vertex_z_m)
+    axis = str(axis).lower()
+    if np.isnan(radius_m) or radius_m <= 0:
+        raise ValueError("radius_m must be positive or np.inf for a plane.")
+    if vertex_z_m < 0:
+        raise ValueError("vertex_z_m must be nonnegative.")
+    if axis not in {"x", "y"}:
+        raise ValueError("axis must be 'x' or 'y'.")
+    if center_xy_m is None:
+        center_xy_m = _default_center_xy(P)
+    xc, yc = map(float, center_xy_m)
+
+    Nx, Ny, _ = _grid_counts(P)
+    perpendicular_center_m = yc if axis == "x" else xc
+    perpendicular_max_m = ((Ny - 1) if axis == "x" else (Nx - 1)) * P.a_m
+    maximum_offset_m = max(
+        abs(perpendicular_center_m),
+        abs(perpendicular_max_m - perpendicular_center_m),
+    )
+    tolerance = 1e-12 * max(maximum_offset_m, P.a_m)
+    if maximum_offset_m > radius_m + tolerance:
+        raise ValueError(
+            "radius_m is too small to span the complete domain. Require "
+            f"radius_m >= {maximum_offset_m:.6e} m for axis={axis!r}."
+        )
+    if np.isinf(radius_m):
+        edge_sagitta_m = 0.0
+    else:
+        edge_root_m = np.sqrt(
+            max(radius_m**2 - maximum_offset_m**2, 0.0)
+        )
+        # Algebraically equivalent to R - sqrt(R^2 - u^2), but stable as
+        # R approaches infinity (the planar limit).
+        edge_sagitta_m = maximum_offset_m**2 / (radius_m + edge_root_m)
+    edge_height_m = vertex_z_m + edge_sagitta_m
+    if edge_height_m > P.H_m + tolerance:
+        raise ValueError(
+            "The curved sheet exceeds P.H_m at a domain edge. Increase H_m, "
+            "increase radius_m, or decrease vertex_z_m."
+        )
+
+    def height(X_m: np.ndarray, Y_m: np.ndarray) -> np.ndarray:
+        coordinate = Y_m - yc if axis == "x" else X_m - xc
+        if np.isinf(radius_m):
+            return np.full(X_m.shape, vertex_z_m, dtype=float)
+        root_m = np.sqrt(np.maximum(radius_m**2 - coordinate**2, 0.0))
+        sagitta_m = coordinate**2 / (radius_m + root_m)
+        return vertex_z_m + sagitta_m
+
+    geometry = make_height_field_geometry(P, height, name=name)
+    geometry.curved_sheet_radius_m = radius_m
+    geometry.curved_sheet_axis = axis
+    geometry.curved_sheet_center_xy_m = (xc, yc)
+    geometry.curved_sheet_vertex_z_m = vertex_z_m
+    geometry.curved_sheet_edge_height_m = float(edge_height_m)
+    geometry.curved_sheet_principal_curvature_m_inv = (
+        0.0 if np.isinf(radius_m) else 1.0 / radius_m
+    )
+    return geometry
+
+
+def make_sinusoidal_height_field_geometry(
+    P: Params,
+    amplitude_m: float,
+    wavelength_x_m: float,
+    wavelength_y_m: Optional[float] = None,
+    mean_z_m: Optional[float] = None,
+    phase_x_rad: float = 0.0,
+    phase_y_rad: float = 0.0,
+    name: str = "sinusoidal_height_field",
+) -> SensorGeometry:
+    """Construct a periodic surface containing many local curvatures.
+
+    With both wavelengths supplied, the height is
+
+    ``mean_z + amplitude*cos(2*pi*x/lambda_x + phase_x)``
+    ``                 *cos(2*pi*y/lambda_y + phase_y)``.
+
+    Passing ``wavelength_y_m=None`` produces a one-dimensional corrugation
+    that is invariant along y. Positive amplitude generates alternating
+    concave valleys and convex peaks with smooth transitions between them.
+    """
+
+    amplitude_m = float(amplitude_m)
+    wavelength_x_m = float(wavelength_x_m)
+    if amplitude_m <= 0:
+        raise ValueError("amplitude_m must be positive.")
+    if wavelength_x_m <= 0:
+        raise ValueError("wavelength_x_m must be positive.")
+    if wavelength_y_m is not None:
+        wavelength_y_m = float(wavelength_y_m)
+        if wavelength_y_m <= 0:
+            raise ValueError("wavelength_y_m must be positive when supplied.")
+    if mean_z_m is None:
+        mean_z_m = amplitude_m
+    mean_z_m = float(mean_z_m)
+    if mean_z_m - amplitude_m < 0:
+        raise ValueError("mean_z_m - amplitude_m must be nonnegative.")
+    if mean_z_m + amplitude_m > P.H_m:
+        raise ValueError("mean_z_m + amplitude_m must not exceed P.H_m.")
+    if not np.isfinite(phase_x_rad) or not np.isfinite(phase_y_rad):
+        raise ValueError("Sinusoidal phases must be finite.")
+
+    kx_m_inv = 2.0 * np.pi / wavelength_x_m
+    ky_m_inv = None if wavelength_y_m is None else 2.0 * np.pi / wavelength_y_m
+
+    def height(X_m: np.ndarray, Y_m: np.ndarray) -> np.ndarray:
+        x_wave = np.cos(kx_m_inv * X_m + float(phase_x_rad))
+        if ky_m_inv is None:
+            modulation = x_wave
+        else:
+            modulation = x_wave * np.cos(
+                ky_m_inv * Y_m + float(phase_y_rad)
+            )
+        return mean_z_m + amplitude_m * modulation
+
+    geometry = make_height_field_geometry(P, height, name=name)
+    geometry.sinusoidal_amplitude_m = amplitude_m
+    geometry.sinusoidal_wavelength_x_m = wavelength_x_m
+    geometry.sinusoidal_wavelength_y_m = wavelength_y_m
+    geometry.sinusoidal_mean_z_m = mean_z_m
+    geometry.sinusoidal_phase_x_rad = float(phase_x_rad)
+    geometry.sinusoidal_phase_y_rad = float(phase_y_rad)
+    return geometry
+
+
+def sinusoidal_surface_curvatures(
+    x_m: np.ndarray,
+    y_m: np.ndarray,
+    *,
+    amplitude_m: float,
+    wavelength_x_m: float,
+    wavelength_y_m: float,
+    phase_x_rad: float = 0.0,
+    phase_y_rad: float = 0.0,
+) -> Dict[str, np.ndarray]:
+    """Evaluate analytic curvatures of the 2D sinusoidal height field.
+
+    Curvature signs use the upward-pointing surface normal. Consequently,
+    concave valleys have positive mean curvature and convex peaks negative
+    mean curvature. Returned values are in m^-1 (mean and principal) and m^-2
+    (Gaussian).
+    """
+
+    x_m, y_m = np.broadcast_arrays(
+        np.asarray(x_m, dtype=float), np.asarray(y_m, dtype=float)
+    )
+    amplitude_m = float(amplitude_m)
+    kx = 2.0 * np.pi / float(wavelength_x_m)
+    ky = 2.0 * np.pi / float(wavelength_y_m)
+    X = kx * x_m + float(phase_x_rad)
+    Y = ky * y_m + float(phase_y_rad)
+    sin_x, cos_x = np.sin(X), np.cos(X)
+    sin_y, cos_y = np.sin(Y), np.cos(Y)
+    fx = -amplitude_m * kx * sin_x * cos_y
+    fy = -amplitude_m * ky * cos_x * sin_y
+    fxx = -amplitude_m * kx**2 * cos_x * cos_y
+    fyy = -amplitude_m * ky**2 * cos_x * cos_y
+    fxy = amplitude_m * kx * ky * sin_x * sin_y
+    metric = 1.0 + fx**2 + fy**2
+    mean = (
+        (1.0 + fy**2) * fxx
+        - 2.0 * fx * fy * fxy
+        + (1.0 + fx**2) * fyy
+    ) / (2.0 * metric**1.5)
+    gaussian = (fxx * fyy - fxy**2) / metric**2
+    discriminant = np.sqrt(np.maximum(mean**2 - gaussian, 0.0))
+    return {
+        "mean_curvature_m_inv": mean,
+        "gaussian_curvature_m_inv2": gaussian,
+        "principal_curvature_1_m_inv": mean + discriminant,
+        "principal_curvature_2_m_inv": mean - discriminant,
+    }
+
+
 def make_cylindrical_post_geometry(
     P: Params,
     radius_m: float,

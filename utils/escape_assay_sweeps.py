@@ -1,4 +1,4 @@
-"""Shared IPyParallel machinery for spherical-bowl escape-assay sweeps."""
+"""Shared IPyParallel machinery for escape-assay sweeps."""
 
 from __future__ import annotations
 
@@ -117,16 +117,27 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
         export_escape_assay_run,
         summarize_receptor_trajectories,
     )
-    from utils.generate_geometries import make_spherical_bowl_geometry
+    from utils.generate_geometries import (
+        make_cylindrically_curved_sheet_geometry,
+        make_sinusoidal_height_field_geometry,
+        make_spherical_bowl_geometry,
+        sinusoidal_surface_curvatures,
+    )
 
     run_directory = Path(task["run_directory"])
     manifest_path = run_directory / "manifest.json"
+    raw_sweep_value = task.get("sweep_value")
+    sweep_value = (
+        None
+        if raw_sweep_value is None or not np.isfinite(float(raw_sweep_value))
+        else float(raw_sweep_value)
+    )
     try:
         if manifest_path.exists() and not task["overwrite"]:
             return {
                 "status": "skipped",
                 "sweep_parameter": task["sweep_parameter"],
-                "sweep_value": task["sweep_value"],
+                "sweep_value": sweep_value,
                 "replicate": task["replicate"],
                 "run_directory": str(run_directory),
             }
@@ -135,7 +146,15 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
         if "open_boundaries" in params_data:
             params_data["open_boundaries"] = tuple(params_data["open_boundaries"])
         params = Params(**params_data)
-        geometry = make_spherical_bowl_geometry(params, **task["geometry"])
+        geometry_type = task.get("geometry_type", "spherical_bowl")
+        geometry_builders = {
+            "spherical_bowl": make_spherical_bowl_geometry,
+            "cylindrically_curved_sheet": make_cylindrically_curved_sheet_geometry,
+            "sinusoidal_height_field": make_sinusoidal_height_field_geometry,
+        }
+        if geometry_type not in geometry_builders:
+            raise ValueError(f"Unsupported geometry_type: {geometry_type!r}")
+        geometry = geometry_builders[geometry_type](params, **task["geometry"])
         receptor_faces = sample_receptor_faces(
             params,
             geometry,
@@ -165,10 +184,38 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             seed=int(task["trajectory_seed"]),
         )
         receptor_summary = summarize_receptor_trajectories(result)
+        if geometry_type == "sinusoidal_height_field":
+            curvature_arguments = {
+                key: task["geometry"][key]
+                for key in (
+                    "amplitude_m",
+                    "wavelength_x_m",
+                    "wavelength_y_m",
+                    "phase_x_rad",
+                    "phase_y_rad",
+                )
+                if key in task["geometry"]
+            }
+            if curvature_arguments.get("wavelength_y_m") is None:
+                raise ValueError(
+                    "Curvature annotation currently requires a two-dimensional "
+                    "sinusoidal field with wavelength_y_m set."
+                )
+            curvature = sinusoidal_surface_curvatures(
+                receptor_summary["surface_x_m"].to_numpy(float),
+                receptor_summary["surface_y_m"].to_numpy(float),
+                **curvature_arguments,
+            )
+            for column, values in curvature.items():
+                receptor_summary[column] = values
+            receptor_summary["abs_mean_curvature_m_inv"] = np.abs(
+                receptor_summary["mean_curvature_m_inv"]
+            )
         metadata = {
             "protocol": task["protocol"],
+            "geometry_type": geometry_type,
             "sweep_parameter": task["sweep_parameter"],
-            "sweep_value": float(task["sweep_value"]),
+            "sweep_value": sweep_value,
             "replicate": int(task["replicate"]),
             "receptor_seed": int(task["receptor_seed"]),
             "trajectory_seed": int(task["trajectory_seed"]),
@@ -184,7 +231,7 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "status": "completed",
             "sweep_parameter": task["sweep_parameter"],
-            "sweep_value": float(task["sweep_value"]),
+            "sweep_value": sweep_value,
             "replicate": int(task["replicate"]),
             "run_directory": str(run_directory),
             "n_receptors": int(receptor_faces.size),

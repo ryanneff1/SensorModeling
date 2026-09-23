@@ -9,6 +9,7 @@ from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
+from matplotlib.collections import PolyCollection
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 import pandas as pd
@@ -20,6 +21,22 @@ try:
     from scipy.spatial import cKDTree
 except ImportError:  # pragma: no cover
     cKDTree = None
+
+
+def _json_safe(value):
+    """Convert NumPy values and non-finite floats to strict JSON values."""
+
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return [_json_safe(item) for item in value.tolist()]
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
 
 
 @dataclass
@@ -95,7 +112,7 @@ def export_escape_assay_run(
     if run_metadata is not None:
         metadata["run_metadata"] = dict(run_metadata)
     with (directory / "manifest.json").open("w", encoding="utf-8") as stream:
-        json.dump(metadata, stream, indent=2, sort_keys=True)
+        json.dump(_json_safe(metadata), stream, indent=2, sort_keys=True, allow_nan=False)
     return directory
 
 
@@ -386,6 +403,111 @@ def plot_surface_metric_3d(
     return fig, ax, interpolated
 
 
+def plot_surface_metric_xy(
+    geometry: SensorGeometry,
+    receptor_summary: pd.DataFrame,
+    metric: str,
+    *,
+    a_m: float,
+    surface_face_ids: Optional[Sequence[int]] = None,
+    cmap: str = "viridis",
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    colorbar_label: Optional[str] = None,
+    coordinate_scale: float = 1e9,
+    coordinate_unit: str = "nm",
+    show_receptors: bool = True,
+    receptor_size: float = 5.0,
+    upward_faces_only: bool = True,
+    figsize: tuple[float, float] = (7.0, 6.0),
+    ax=None,
+):
+    """Plot a top-down x-y projection of an interpolated surface metric.
+
+    By default, only upward-facing surface elements are drawn. For height-field
+    geometries such as spherical bowls, this produces the surface visible from
+    directly overhead without vertical voxel sidewalls obscuring the map.
+    """
+
+    interpolated = interpolate_receptor_metric_to_surface(
+        geometry,
+        receptor_summary,
+        metric,
+        surface_face_ids=surface_face_ids,
+    )
+    face_ids = interpolated["face_id"].to_numpy(np.int64)
+    if upward_faces_only:
+        keep = geometry.surface_normals[face_ids, 2] > 0
+        interpolated = interpolated.loc[keep].reset_index(drop=True)
+        face_ids = face_ids[keep]
+    if face_ids.size == 0:
+        raise ValueError("No surface faces remain for the x-y projection.")
+
+    values = interpolated[metric].to_numpy(float)
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        raise ValueError(f"Metric {metric!r} has no finite projected values.")
+    if vmin is None:
+        vmin = float(np.nanmin(values))
+    if vmax is None:
+        vmax = float(np.nanmax(values))
+    if np.isclose(vmin, vmax):
+        padding = max(abs(vmin) * 0.01, 1e-12)
+        vmin -= padding
+        vmax += padding
+
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    colormap = plt.get_cmap(cmap)
+    face_colors = colormap(norm(values))
+    face_colors[~finite] = (0.7, 0.7, 0.7, 1.0)
+    centers = geometry.surface_centers_m[face_ids, :2] * coordinate_scale
+    half_width = 0.5 * a_m * coordinate_scale
+    polygons = np.stack(
+        [
+            centers + (-half_width, -half_width),
+            centers + (half_width, -half_width),
+            centers + (half_width, half_width),
+            centers + (-half_width, half_width),
+        ],
+        axis=1,
+    )
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    collection = PolyCollection(
+        polygons,
+        facecolors=face_colors,
+        edgecolors="none",
+        linewidths=0,
+        antialiased=False,
+    )
+    ax.add_collection(collection)
+    padding = a_m * coordinate_scale
+    ax.set_xlim(centers[:, 0].min() - padding, centers[:, 0].max() + padding)
+    ax.set_ylim(centers[:, 1].min() - padding, centers[:, 1].max() + padding)
+    ax.set_aspect("equal", adjustable="box")
+
+    if show_receptors:
+        receptor_xy = receptor_summary[["surface_x_m", "surface_y_m"]].to_numpy(float)
+        receptor_xy *= coordinate_scale
+        ax.scatter(
+            receptor_xy[:, 0], receptor_xy[:, 1], s=receptor_size,
+            c="black", alpha=0.5, linewidths=0, label="release receptors",
+        )
+    ax.set(
+        xlabel=f"x ({coordinate_unit})",
+        ylabel=f"y ({coordinate_unit})",
+        title=f"{metric.replace('_', ' ')} — overhead",
+    )
+    scalar_mappable = plt.cm.ScalarMappable(norm=norm, cmap=colormap)
+    scalar_mappable.set_array(values)
+    colorbar = fig.colorbar(scalar_mappable, ax=ax, shrink=0.82, pad=0.03)
+    colorbar.set_label(colorbar_label or metric.replace("_", " "))
+    return fig, ax, interpolated
+
+
 def plot_kaplan_meier_curves(
     survival: pd.DataFrame,
     *,
@@ -467,5 +589,6 @@ __all__ = [
     "plot_kaplan_meier_curves",
     "plot_surface_metric_from_folder",
     "plot_surface_metric_3d",
+    "plot_surface_metric_xy",
     "summarize_receptor_trajectories",
 ]
