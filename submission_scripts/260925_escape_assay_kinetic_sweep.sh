@@ -3,7 +3,7 @@
 #SBATCH --partition=buyin
 #SBATCH --time=10:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=20
+#SBATCH --ntasks=13
 #SBATCH --mem-per-cpu=4G
 #SBATCH --job-name=260925_escape_assay_kinetic_sweep
 #SBATCH --output=slurm-%x-%j.out
@@ -24,7 +24,7 @@ OUTPUT_ROOT="${PROJECT_DIR}/results/260925_escape_assay_kinetic_sweep_periodic_x
 
 N_REPLICATES=5
 # There are 5 kinetic conditions x 5 replicates = 25 independently scheduled tasks.
-N_WORKERS=20
+N_WORKERS=13
 
 unset PYTHONPATH
 unset PYTHONHOME
