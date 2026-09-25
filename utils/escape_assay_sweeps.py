@@ -224,6 +224,8 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             "geometry": task["geometry"],
             "assay": assay,
         }
+        if task.get("condition_metadata") is not None:
+            metadata["condition"] = task["condition_metadata"]
         export_escape_assay_run(
             result,
             run_directory,
