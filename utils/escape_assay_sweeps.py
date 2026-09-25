@@ -26,8 +26,9 @@ def load_params_json(path: str | Path) -> tuple[Params, dict]:
     if unknown:
         raise ValueError(f"Unknown Params fields: {sorted(unknown)}")
     values = dict(values)
-    if "open_boundaries" in values:
-        values["open_boundaries"] = tuple(values["open_boundaries"])
+    for tuple_field in ("open_boundaries", "periodic_axes"):
+        if tuple_field in values:
+            values[tuple_field] = tuple(values[tuple_field])
     return Params(**values), raw
 
 
@@ -143,8 +144,9 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         params_data = dict(task["params"])
-        if "open_boundaries" in params_data:
-            params_data["open_boundaries"] = tuple(params_data["open_boundaries"])
+        for tuple_field in ("open_boundaries", "periodic_axes"):
+            if tuple_field in params_data:
+                params_data[tuple_field] = tuple(params_data[tuple_field])
         params = Params(**params_data)
         geometry_type = task.get("geometry_type", "spherical_bowl")
         geometry_builders = {

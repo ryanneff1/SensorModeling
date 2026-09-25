@@ -149,8 +149,9 @@ def load_escape_assay_run(input_directory) -> EscapeAssayArchive:
         )
 
     params_data = dict(metadata["params"])
-    if "open_boundaries" in params_data:
-        params_data["open_boundaries"] = tuple(params_data["open_boundaries"])
+    for tuple_field in ("open_boundaries", "periodic_axes"):
+        if tuple_field in params_data:
+            params_data[tuple_field] = tuple(params_data[tuple_field])
     params = Params(**params_data)
     return EscapeAssayArchive(
         directory=directory,

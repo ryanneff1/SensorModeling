@@ -16,6 +16,7 @@
   "use_poisson_ligand_count": false,
   "allow_multiple_receptors_per_site": false,
   "open_boundaries": ["z_max"],
+  "periodic_axes": ["x", "y"],
   "use_well_mixed_reservoir": false,
   "reservoir_offset_layers": 1,
   "seed": 7

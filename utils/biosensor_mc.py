@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - used only when scipy is unavailable
     distance_transform_edt = None
 
 
-MODEL_VERSION = "2026-08-17-well-mixed-reservoir-v1"
+MODEL_VERSION = "2026-09-24-periodic-lateral-boundaries-v1"
 
 NA = 6.02214076e23
 L_PER_M3 = 1e3
@@ -99,7 +99,8 @@ class Params:
     allow_multiple_receptors_per_site: bool = False
 
     # These faces exchange ligands with a bulk reservoir. Other outer faces
-    # are reflecting. The default reproduces the original flat-sensor model.
+    # are reflecting unless their axis is periodic. The default reproduces
+    # the original flat-sensor model.
     open_boundaries: Tuple[str, ...] = (
         "x_min",
         "x_max",
@@ -107,6 +108,10 @@ class Params:
         "y_max",
         "z_max",
     )
+
+    # Identified lateral faces. A step through +x/-x or +y/-y re-enters at
+    # the opposite face. Periodic axes cannot also be open boundaries.
+    periodic_axes: Tuple[str, ...] = ()
 
     # Optional reduced-order mixing model. When enabled, the explicitly
     # simulated diffusion domain ends reservoir_offset_layers lattice spacings
@@ -177,6 +182,7 @@ class Derived:
     D_m2_s: float
     a_m: float
     open_boundaries: Tuple[str, ...]
+    periodic_axes: Tuple[str, ...]
 
     use_well_mixed_reservoir: bool
     reservoir_offset_layers: int
@@ -250,6 +256,7 @@ from utils.generate_geometries import (
     _distance_to_reactive_surface,
     _grid_counts,
     _validate_open_boundaries,
+    _validate_periodic_axes,
     geometry_from_solid_mask,
     make_cylindrical_post_geometry,
     make_cylindrical_trough_geometry,
@@ -284,6 +291,18 @@ def derive(
         raise ValueError("reaction_volume_voxels must be at least 1.")
 
     requested_open_boundaries = _validate_open_boundaries(P.open_boundaries)
+    periodic_axes = _validate_periodic_axes(P.periodic_axes)
+    conflicting_faces = {
+        face
+        for axis in periodic_axes
+        for face in (f"{axis}_min", f"{axis}_max")
+        if face in requested_open_boundaries
+    }
+    if conflicting_faces:
+        raise ValueError(
+            "Periodic axes cannot also have open faces. Remove these faces "
+            f"from open_boundaries: {sorted(conflicting_faces)}"
+        )
 
     if geometry is None:
         geometry = make_flat_geometry(P)
@@ -304,6 +323,7 @@ def derive(
     bulk_accessible_fluid_mask = _bulk_accessible_fluid_mask(
         fluid_mask,
         requested_open_boundaries,
+        periodic_axes,
     )
 
     solid_xyz = np.argwhere(geometry.solid_mask)
@@ -487,6 +507,7 @@ def derive(
             grid_shape,
             geometry.surface_solid_xyz[reactive_face_ids],
             P.a_m,
+            periodic_axes,
         )
     else:
         distance_to_reactive_surface_m = np.full(grid_shape, np.inf)
@@ -535,6 +556,7 @@ def derive(
         D_m2_s=P.D_m2_s,
         a_m=P.a_m,
         open_boundaries=open_boundaries,
+        periodic_axes=periodic_axes,
         use_well_mixed_reservoir=use_well_mixed_reservoir,
         reservoir_offset_layers=reservoir_offset_layers,
         sensor_envelope_z_index=sensor_envelope_z_index,
@@ -1711,6 +1733,17 @@ def _outside_face(xyz: np.ndarray, G: Derived) -> Optional[str]:
     return None
 
 
+def _wrap_periodic_coordinates(xyz: np.ndarray, G: Derived) -> np.ndarray:
+    """Wrap proposed coordinates across configured periodic lateral faces."""
+
+    wrapped = np.asarray(xyz).copy()
+    if "x" in G.periodic_axes:
+        wrapped[..., 0] %= G.Nx
+    if "y" in G.periodic_axes:
+        wrapped[..., 1] %= G.Ny
+    return wrapped
+
+
 def _diffuse_free_ligands(S: State, G: Derived, event_time_s: float) -> None:
     free_ids = np.flatnonzero(S.ligand_active & (S.ligand_receptor < 0))
 
@@ -1719,7 +1752,7 @@ def _diffuse_free_ligands(S: State, G: Derived, event_time_s: float) -> None:
 
     moves = S.rng.choice(7, size=free_ids.size, p=G.move_probs)
     old_positions = S.ligand_xyz[free_ids].copy()
-    proposed = old_positions + MOVE_VECTORS[moves]
+    proposed = _wrap_periodic_coordinates(old_positions + MOVE_VECTORS[moves], G)
 
     lost_by_face: Dict[str, List[int]] = {face: [] for face in BOUNDARY_FACES}
     lost_to_well_mixed_bulk: List[int] = []

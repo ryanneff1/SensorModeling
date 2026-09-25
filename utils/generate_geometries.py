@@ -111,6 +111,18 @@ def _validate_open_boundaries(open_boundaries: Sequence[str]) -> Tuple[str, ...]
     return result
 
 
+def _validate_periodic_axes(periodic_axes: Sequence[str]) -> Tuple[str, ...]:
+    """Normalize the lateral axes whose outer faces are identified."""
+
+    result = tuple(dict.fromkeys(str(axis).lower() for axis in periodic_axes))
+    invalid = sorted(set(result) - {"x", "y"})
+    if invalid:
+        raise ValueError(
+            f"Unknown periodic axis name(s): {invalid}. Allowed axes are ('x', 'y')."
+        )
+    return result
+
+
 def _boundary_sites(mask: np.ndarray, face: str) -> np.ndarray:
     if face == "x_min":
         local = np.argwhere(mask[0, :, :])
@@ -158,6 +170,7 @@ def _boundary_sites(mask: np.ndarray, face: str) -> np.ndarray:
 def _bulk_accessible_fluid_mask(
     fluid_mask: np.ndarray,
     open_boundaries: Sequence[str],
+    periodic_axes: Sequence[str] = (),
 ) -> np.ndarray:
     """Return fluid sites connected to at least one open outer boundary."""
 
@@ -184,6 +197,7 @@ def _bulk_accessible_fluid_mask(
     )
     accessible[seed_mask] = True
     nx, ny, nz = fluid_mask.shape
+    periodic_axes = _validate_periodic_axes(periodic_axes)
 
     while queue:
         x, y, z = queue.popleft()
@@ -192,6 +206,11 @@ def _bulk_accessible_fluid_mask(
             xn = x + dx
             yn = y + dy
             zn = z + dz
+
+            if "x" in periodic_axes:
+                xn %= nx
+            if "y" in periodic_axes:
+                yn %= ny
 
             if not (0 <= xn < nx and 0 <= yn < ny and 0 <= zn < nz):
                 continue
@@ -208,6 +227,7 @@ def _bulk_accessible_fluid_mask(
 def _distance_to_surface_fallback(
     seed_mask: np.ndarray,
     a_m: float,
+    periodic_axes: Sequence[str] = (),
 ) -> np.ndarray:
     """Six-neighbor graph-distance fallback used when SciPy is unavailable."""
 
@@ -226,6 +246,7 @@ def _distance_to_surface_fallback(
         queue.append(xyz_tuple)
 
     nx, ny, nz = seed_mask.shape
+    periodic_axes = _validate_periodic_axes(periodic_axes)
 
     while queue:
         x, y, z = queue.popleft()
@@ -235,6 +256,11 @@ def _distance_to_surface_fallback(
             xn = x + dx
             yn = y + dy
             zn = z + dz
+
+            if "x" in periodic_axes:
+                xn %= nx
+            if "y" in periodic_axes:
+                yn %= ny
 
             if not (0 <= xn < nx and 0 <= yn < ny and 0 <= zn < nz):
                 continue
@@ -252,6 +278,7 @@ def _distance_to_reactive_surface(
     shape: Tuple[int, int, int],
     reactive_surface_solid_xyz: np.ndarray,
     a_m: float,
+    periodic_axes: Sequence[str] = (),
 ) -> np.ndarray:
     seed_mask = np.zeros(shape, dtype=bool)
     seed_mask[
@@ -260,10 +287,18 @@ def _distance_to_reactive_surface(
         reactive_surface_solid_xyz[:, 2],
     ] = True
 
+    periodic_axes = _validate_periodic_axes(periodic_axes)
     if distance_transform_edt is not None:
-        return distance_transform_edt(~seed_mask, sampling=a_m)
+        repetitions = tuple(3 if axis in periodic_axes else 1 for axis in ("x", "y")) + (1,)
+        tiled_seed_mask = np.tile(seed_mask, repetitions)
+        tiled_distance = distance_transform_edt(~tiled_seed_mask, sampling=a_m)
+        slices = tuple(
+            slice(size, 2 * size) if axis in periodic_axes else slice(0, size)
+            for axis, size in zip(("x", "y", "z"), shape)
+        )
+        return tiled_distance[slices]
 
-    return _distance_to_surface_fallback(seed_mask, a_m)
+    return _distance_to_surface_fallback(seed_mask, a_m, periodic_axes)
 
 
 def geometry_from_solid_mask(

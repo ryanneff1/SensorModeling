@@ -46,6 +46,7 @@ from utils.biosensor_mc import (
     Derived,
     Params,
     SensorGeometry,
+    _wrap_periodic_coordinates,
     derive,
 )
 
@@ -433,7 +434,9 @@ def run_escape_assay(
         free_ids = np.flatnonzero(active & (bound_receptor < 0))
         if free_ids.size:
             moves = rng.choice(7, size=free_ids.size, p=G.move_probs)
-            proposed = xyz[free_ids] + MOVE_VECTORS[moves]
+            proposed = _wrap_periodic_coordinates(
+                xyz[free_ids] + MOVE_VECTORS[moves], G
+            )
 
             domain_escape = np.zeros(free_ids.size, dtype=bool)
             domain_reason = np.full(free_ids.size, "", dtype=object)
