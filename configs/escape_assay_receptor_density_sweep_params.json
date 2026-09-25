@@ -12,7 +12,7 @@
   },
   "assay": {
     "n_trials_per_location": 20,
-    "max_time_s": 0.25,
+    "max_time_s": 1,
     "escape_mode": "z_plane",
     "escape_z_m": 75e-9
   }

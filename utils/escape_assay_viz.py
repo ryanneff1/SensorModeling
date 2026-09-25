@@ -491,8 +491,12 @@ def plot_surface_metric_xy(
     ax.set_aspect("equal", adjustable="box")
 
     if show_receptors:
-        receptor_xy = receptor_summary[["surface_x_m", "surface_y_m"]].to_numpy(float)
-        receptor_xy *= coordinate_scale
+        # pandas may return a read-only view (notably with copy-on-write
+        # enabled), so perform the scaling out of place.
+        receptor_xy = (
+            receptor_summary[["surface_x_m", "surface_y_m"]].to_numpy(float)
+            * coordinate_scale
+        )
         ax.scatter(
             receptor_xy[:, 0], receptor_xy[:, 1], s=receptor_size,
             c="black", alpha=0.5, linewidths=0, label="release receptors",
