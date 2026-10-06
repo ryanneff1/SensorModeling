@@ -323,6 +323,8 @@ def run_escape_assay(
     escape_z_m: Optional[float] = None,
     receptor_face_ids: Optional[Sequence[int]] = None,
     seed: Optional[int] = None,
+    start_bound: bool = True,
+    rebinding_k_on_multiplier: float = 1.0,
 ) -> EscapeAssayResult:
     """Run independent single-molecule release trajectories.
 
@@ -354,12 +356,37 @@ def run_escape_assay(
         included so receptor-release assays genuinely begin at a receptor.
     seed
         Assay RNG seed. Defaults to ``P.seed``.
+    start_bound
+        When true (default), releases with a source receptor begin bound to
+        that receptor. The initial bound interval is sampled from the same
+        dissociation law as later intervals and contributes to cumulative
+        bound time, but is not counted as a rebinding. Coordinate releases
+        without ``source_face_id`` still begin free. Set false to reproduce
+        the older post-dissociation initialization.
+    rebinding_k_on_multiplier
+        Multiplier applied only to association attempts after release. A value
+        of zero disables rebinding while preserving the intrinsic ``k_on`` and
+        ``k_off`` stored in ``P`` for classical-affinity comparisons. The
+        default of one uses the unmodified microscopic binding rule.
+
+    Notes
+    -----
+    Free diffusion is resolved at ``P.dt_s``. Bound intervals are advanced
+    event-wise: the number of lattice timesteps to dissociation is sampled
+    from the geometric distribution implied by the model's per-step
+    probability ``p_off = 1 - exp(-k_off*dt)``. This is statistically
+    equivalent to testing dissociation every timestep, but its cost is
+    independent of the bound-state lifetime. It is exact here because assay
+    trajectories contain one noninteracting ligand and the receptor field is
+    static.
     """
 
     if n_trials_per_location < 1:
         raise ValueError("n_trials_per_location must be at least 1.")
     if max_time_s <= 0:
         raise ValueError("max_time_s must be positive.")
+    if not np.isfinite(rebinding_k_on_multiplier) or rebinding_k_on_multiplier < 0:
+        raise ValueError("rebinding_k_on_multiplier must be finite and nonnegative.")
     if not release_locations:
         raise ValueError("release_locations must contain at least one location.")
     if len({location.label for location in release_locations}) != len(release_locations):
@@ -401,6 +428,26 @@ def run_escape_assay(
     xyz = release_xyz[location_ids].copy()
     source_face_per_molecule = source_faces[location_ids]
     bound_receptor = np.full(n_total, -1, dtype=np.int64)
+    started_bound = np.zeros(n_total, dtype=bool)
+    if start_bound:
+        # Source faces are forced into the receptor layout. If multiple
+        # receptors occupy one face, select the first deterministic copy for
+        # the initial state; later binding retains the existing random choice.
+        face_to_receptor: dict[int, int] = {}
+        for receptor_id, face_id in enumerate(receptor_faces):
+            face_to_receptor.setdefault(int(face_id), int(receptor_id))
+        source_ids = np.flatnonzero(source_face_per_molecule >= 0)
+        for molecule_id in source_ids:
+            receptor_id = face_to_receptor.get(
+                int(source_face_per_molecule[molecule_id])
+            )
+            if receptor_id is None:
+                raise RuntimeError("A source receptor face is missing from the layout.")
+            bound_receptor[molecule_id] = receptor_id
+            xyz[molecule_id] = G.geometry.surface_solid_xyz[
+                receptor_faces[receptor_id]
+            ]
+            started_bound[molecule_id] = True
     active = np.ones(n_total, dtype=bool)
     escaped = np.zeros(n_total, dtype=bool)
     escape_time = np.full(n_total, np.nan)
@@ -418,96 +465,150 @@ def run_escape_assay(
         initially_escaped = xyz[:, 2] * G.a_m >= float(escape_z_m)
     else:
         initially_escaped = np.zeros(n_total, dtype=bool)
+    initially_escaped &= ~started_bound
     active[initially_escaped] = False
     escaped[initially_escaped] = True
     escape_time[initially_escaped] = 0.0
     escape_reason[initially_escaped] = mode
 
-    # A partial lattice timestep does not have the same transition kernel.
-    # Simulate complete timesteps only and right-censor at the requested time.
+    # Trajectories are independent, so their clocks do not need to remain
+    # synchronized. Free motion still advances by the exact lattice timestep.
+    # On binding, sample the complete discrete waiting time to dissociation in
+    # one operation. A geometric(p_off) variate exactly reproduces repeated
+    # per-step Bernoulli dissociation tests and guarantees at least one bound
+    # timestep, matching the original update ordering.
     n_steps = int(np.floor(max_time_s / G.dt_s))
-    for step_index in range(1, n_steps + 1):
-        event_time = step_index * G.dt_s
-        bound_start = active & (bound_receptor >= 0)
-        total_bound_time[bound_start] += G.dt_s
+    elapsed_steps = np.zeros(n_total, dtype=np.int64)
 
+    def advance_bound_intervals(binding_ids: np.ndarray) -> None:
+        """Advance independent bound trajectories to release or censoring."""
+
+        if binding_ids.size == 0:
+            return
+        remaining_steps = n_steps - elapsed_steps[binding_ids]
+        if G.p_off > 0:
+            dwell_steps = rng.geometric(
+                G.p_off, size=binding_ids.size
+            ).astype(np.int64)
+            completes = dwell_steps <= remaining_steps
+        else:
+            dwell_steps = remaining_steps + 1
+            completes = np.zeros(binding_ids.size, dtype=bool)
+
+        completed_ids = binding_ids[completes]
+        if completed_ids.size:
+            completed_dwell = dwell_steps[completes]
+            total_bound_time[completed_ids] += completed_dwell * G.dt_s
+            elapsed_steps[completed_ids] += completed_dwell
+            receptor_ids = bound_receptor[completed_ids]
+            xyz[completed_ids] = receptor_release_xyz[receptor_ids]
+            bound_receptor[completed_ids] = -1
+            n_unbindings[completed_ids] += 1
+
+        censored_ids = binding_ids[~completes]
+        if censored_ids.size:
+            censored_dwell = remaining_steps[~completes]
+            total_bound_time[censored_ids] += censored_dwell * G.dt_s
+            elapsed_steps[censored_ids] = n_steps
+            active[censored_ids] = False
+
+    # Receptor releases now begin in the bound state. Their first dissociation
+    # is advanced before any free diffusion, and is not counted as rebinding.
+    advance_bound_intervals(np.flatnonzero(active & (bound_receptor >= 0)))
+    active[active & (bound_receptor < 0) & (elapsed_steps >= n_steps)] = False
+    while np.any(active):
         free_ids = np.flatnonzero(active & (bound_receptor < 0))
-        if free_ids.size:
-            moves = rng.choice(7, size=free_ids.size, p=G.move_probs)
-            proposed = _wrap_periodic_coordinates(
-                xyz[free_ids] + MOVE_VECTORS[moves], G
+        if free_ids.size == 0:
+            # This is possible only for irreversible binding (p_off == 0), as
+            # finite-p_off bound intervals are handled immediately below.
+            bound_ids = np.flatnonzero(active & (bound_receptor >= 0))
+            remaining_steps = n_steps - elapsed_steps[bound_ids]
+            total_bound_time[bound_ids] += remaining_steps * G.dt_s
+            elapsed_steps[bound_ids] = n_steps
+            active[bound_ids] = False
+            break
+
+        # One diffusion timestep on each trajectory's independent clock.
+        elapsed_steps[free_ids] += 1
+        moves = rng.choice(7, size=free_ids.size, p=G.move_probs)
+        proposed = _wrap_periodic_coordinates(
+            xyz[free_ids] + MOVE_VECTORS[moves], G
+        )
+
+        domain_escape = np.zeros(free_ids.size, dtype=bool)
+        domain_reason = np.full(free_ids.size, "", dtype=object)
+        if G.use_well_mixed_reservoir and G.reservoir_explicit_max_z_index is not None:
+            reservoir_loss = proposed[:, 2] > G.reservoir_explicit_max_z_index
+            domain_escape[reservoir_loss] = True
+            domain_reason[reservoir_loss] = "well_mixed_reservoir"
+
+        outside_masks = {
+            "x_min": proposed[:, 0] < 0,
+            "x_max": proposed[:, 0] >= G.Nx,
+            "y_min": proposed[:, 1] < 0,
+            "y_max": proposed[:, 1] >= G.Ny,
+            "z_min": proposed[:, 2] < 0,
+            "z_max": proposed[:, 2] > G.Nz,
+        }
+        outside = np.logical_or.reduce(list(outside_masks.values()))
+        for face, face_mask in outside_masks.items():
+            loss = face_mask & (face in G.open_boundaries)
+            domain_escape[loss] = True
+            domain_reason[loss] = face
+
+        in_bounds = ~outside
+        valid_move = np.zeros(free_ids.size, dtype=bool)
+        if np.any(in_bounds):
+            bounded = proposed[in_bounds]
+            valid_move[in_bounds] = G.accessible_fluid_mask[
+                bounded[:, 0], bounded[:, 1], bounded[:, 2]
+            ]
+        valid_move &= ~domain_escape
+        xyz[free_ids[valid_move]] = proposed[valid_move]
+
+        lost_ids = free_ids[domain_escape]
+        if lost_ids.size:
+            active[lost_ids] = False
+            escaped[lost_ids] = True
+            escape_time[lost_ids] = elapsed_steps[lost_ids] * G.dt_s
+            escape_reason[lost_ids] = domain_reason[domain_escape]
+
+        remaining = free_ids[~domain_escape]
+        if remaining.size:
+            remaining_xyz = xyz[remaining]
+            distances = G.distance_to_reactive_surface_m[
+                remaining_xyz[:, 0], remaining_xyz[:, 1], remaining_xyz[:, 2]
+            ]
+            max_surface_distance[remaining] = np.maximum(
+                max_surface_distance[remaining], distances
             )
-
-            domain_escape = np.zeros(free_ids.size, dtype=bool)
-            domain_reason = np.full(free_ids.size, "", dtype=object)
-            if G.use_well_mixed_reservoir and G.reservoir_explicit_max_z_index is not None:
-                reservoir_loss = proposed[:, 2] > G.reservoir_explicit_max_z_index
-                domain_escape[reservoir_loss] = True
-                domain_reason[reservoir_loss] = "well_mixed_reservoir"
-
-            outside_masks = {
-                "x_min": proposed[:, 0] < 0,
-                "x_max": proposed[:, 0] >= G.Nx,
-                "y_min": proposed[:, 1] < 0,
-                "y_max": proposed[:, 1] >= G.Ny,
-                "z_min": proposed[:, 2] < 0,
-                "z_max": proposed[:, 2] > G.Nz,
-            }
-            outside = np.logical_or.reduce(list(outside_masks.values()))
-            for face, face_mask in outside_masks.items():
-                loss = face_mask & (face in G.open_boundaries)
-                domain_escape[loss] = True
-                domain_reason[loss] = face
-
-            in_bounds = ~outside
-            valid_move = np.zeros(free_ids.size, dtype=bool)
-            if np.any(in_bounds):
-                bounded = proposed[in_bounds]
-                valid_move[in_bounds] = G.accessible_fluid_mask[
-                    bounded[:, 0], bounded[:, 1], bounded[:, 2]
-                ]
-            valid_move &= ~domain_escape
-            xyz[free_ids[valid_move]] = proposed[valid_move]
-
-            lost_ids = free_ids[domain_escape]
-            if lost_ids.size:
-                active[lost_ids] = False
-                escaped[lost_ids] = True
-                escape_time[lost_ids] = event_time
-                escape_reason[lost_ids] = domain_reason[domain_escape]
-
-            remaining = free_ids[~domain_escape]
-            if remaining.size:
-                remaining_xyz = xyz[remaining]
-                distances = G.distance_to_reactive_surface_m[
-                    remaining_xyz[:, 0], remaining_xyz[:, 1], remaining_xyz[:, 2]
-                ]
-                max_surface_distance[remaining] = np.maximum(
-                    max_surface_distance[remaining], distances
-                )
-                if mode == "surface_distance":
-                    local_escape = distances >= threshold_distance
-                elif mode == "z_plane":
-                    local_escape = remaining_xyz[:, 2] * G.a_m >= float(escape_z_m)
-                else:
-                    local_escape = np.zeros(remaining.size, dtype=bool)
-                local_ids = remaining[local_escape]
-                active[local_ids] = False
-                escaped[local_ids] = True
-                escape_time[local_ids] = event_time
-                escape_reason[local_ids] = mode
+            if mode == "surface_distance":
+                local_escape = distances >= threshold_distance
+            elif mode == "z_plane":
+                local_escape = remaining_xyz[:, 2] * G.a_m >= float(escape_z_m)
+            else:
+                local_escape = np.zeros(remaining.size, dtype=bool)
+            local_ids = remaining[local_escape]
+            active[local_ids] = False
+            escaped[local_ids] = True
+            escape_time[local_ids] = elapsed_steps[local_ids] * G.dt_s
+            escape_reason[local_ids] = mode
 
         # Binding follows diffusion, matching biosensor_mc.step(). Each assay
         # trajectory has its own independent copy of every receptor.
-        free_ids = np.flatnonzero(active & (bound_receptor < 0))
-        if free_ids.size and G.kon_exp_per_receptor > 0 and receptor_faces.size:
-            free_sites = _flat_site(xyz[free_ids], G)
+        bindable_ids = np.flatnonzero(active & (bound_receptor < 0))
+        newly_bound: list[np.ndarray] = []
+        rebinding_exponent = (
+            G.kon_exp_per_receptor * float(rebinding_k_on_multiplier)
+        )
+        if bindable_ids.size and rebinding_exponent > 0 and receptor_faces.size:
+            free_sites = _flat_site(xyz[bindable_ids], G)
             for site in np.unique(free_sites):
                 receptors_here = site_to_receptors.get(int(site))
                 if receptors_here is None:
                     continue
-                candidates = free_ids[free_sites == site]
-                p_bind = 1.0 - np.exp(-G.kon_exp_per_receptor * receptors_here.size)
+                candidates = bindable_ids[free_sites == site]
+                p_bind = 1.0 - np.exp(-rebinding_exponent * receptors_here.size)
                 binding_ids = candidates[rng.random(candidates.size) < p_bind]
                 if binding_ids.size == 0:
                     continue
@@ -523,19 +624,18 @@ def run_escape_assay(
                 n_cross[binding_ids[is_cross]] += 1
                 selected_faces = receptor_faces[selected]
                 xyz[binding_ids] = G.geometry.surface_solid_xyz[selected_faces]
+                newly_bound.append(binding_ids)
 
-        # Only molecules that were bound at the start of this timestep may
-        # dissociate; newly bound molecules remain bound for at least one step.
-        dissociation_ids = np.flatnonzero(bound_start & active)
-        if dissociation_ids.size and G.p_off > 0:
-            unbind = dissociation_ids[rng.random(dissociation_ids.size) < G.p_off]
-            receptor_ids = bound_receptor[unbind]
-            xyz[unbind] = receptor_release_xyz[receptor_ids]
-            bound_receptor[unbind] = -1
-            n_unbindings[unbind] += 1
+        # Skip complete rebound intervals without stepping through their empty
+        # physical time. Censor intervals extending beyond the assay horizon.
+        if newly_bound:
+            advance_bound_intervals(np.concatenate(newly_bound))
 
-        if not np.any(active):
-            break
+        # Free trajectories reaching the horizon are right-censored. A ligand
+        # binding on the final diffusion step remains bound with zero observed
+        # bound duration, exactly as in the original complete-step loop.
+        horizon_ids = np.flatnonzero(active & (elapsed_steps >= n_steps))
+        active[horizon_ids] = False
 
     observation_time = np.where(escaped, escape_time, max_time_s)
     trajectories = pd.DataFrame({
@@ -547,6 +647,8 @@ def run_escape_assay(
         "escape_time_s": escape_time,
         "observation_time_s": observation_time,
         "escape_reason": escape_reason,
+        "started_bound": started_bound,
+        "n_bound_intervals": n_bindings + started_bound.astype(np.int64),
         "n_bindings": n_bindings,
         "n_rebindings": n_bindings,
         "n_self_rebindings": n_self,
@@ -557,7 +659,7 @@ def run_escape_assay(
         "final_x_m": xyz[:, 0] * G.a_m,
         "final_y_m": xyz[:, 1] * G.a_m,
         "final_z_m": xyz[:, 2] * G.a_m,
-        "final_bound": active & (bound_receptor >= 0),
+        "final_bound": (~escaped) & (bound_receptor >= 0),
     })
 
     return EscapeAssayResult(

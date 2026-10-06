@@ -1,0 +1,132 @@
+{
+  "protocol": "manuscript_supp_sinusoidal_height_control",
+  "sweep_parameter": "height_boundary_condition",
+  "n_replicates": 6,
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0
+  },
+  "conditions": [
+    {
+      "label": "mean20nm_fixed_plane75nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 20e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean20"
+      },
+      "metadata": {
+        "mean_z_m": 20e-9,
+        "escape_z_m": 75e-9,
+        "boundary_series": "fixed_absolute_plane"
+      }
+    },
+    {
+      "label": "mean30nm_fixed_plane75nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 30e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean30"
+      },
+      "metadata": {
+        "mean_z_m": 30e-9,
+        "escape_z_m": 75e-9,
+        "boundary_series": "fixed_absolute_plane"
+      }
+    },
+    {
+      "label": "mean40nm_fixed_plane75nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 40e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean40"
+      },
+      "metadata": {
+        "mean_z_m": 40e-9,
+        "escape_z_m": 75e-9,
+        "boundary_series": "fixed_absolute_plane"
+      }
+    },
+    {
+      "label": "mean20nm_fixed_offset40nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 20e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean20"
+      },
+      "assay_overrides": {
+        "escape_z_m": 75e-9
+      },
+      "metadata": {
+        "mean_z_m": 20e-9,
+        "escape_z_m": 75e-9,
+        "boundary_series": "fixed_40nm_above_peak"
+      }
+    },
+    {
+      "label": "mean30nm_fixed_offset40nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 30e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean30"
+      },
+      "assay_overrides": {
+        "escape_z_m": 85e-9
+      },
+      "metadata": {
+        "mean_z_m": 30e-9,
+        "escape_z_m": 85e-9,
+        "boundary_series": "fixed_40nm_above_peak"
+      }
+    },
+    {
+      "label": "mean40nm_fixed_offset40nm",
+      "geometry_type": "sinusoidal_height_field",
+      "geometry": {
+        "amplitude_m": 15e-9,
+        "wavelength_x_m": 50e-9,
+        "wavelength_y_m": 50e-9,
+        "mean_z_m": 40e-9,
+        "phase_x_rad": 0.0,
+        "phase_y_rad": 0.0,
+        "name": "sinusoidal_mean40"
+      },
+      "assay_overrides": {
+        "escape_z_m": 95e-9
+      },
+      "metadata": {
+        "mean_z_m": 40e-9,
+        "escape_z_m": 95e-9,
+        "boundary_series": "fixed_40nm_above_peak"
+      }
+    }
+  ]
+}

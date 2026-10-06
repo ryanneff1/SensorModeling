@@ -96,6 +96,8 @@ def export_escape_assay_run(
         "format": "escape-assay-run",
         "format_version": 1,
         "geometry_name": geometry.name,
+        "bound_wait_algorithm": "geometric_event_driven_v1",
+        "default_receptor_release_initialization": "bound",
         "params": asdict(result.params),
         "n_trajectories": int(len(result.trajectories)),
         "n_release_locations": int(len(result.releases)),

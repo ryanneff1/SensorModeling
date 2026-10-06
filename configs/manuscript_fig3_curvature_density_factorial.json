@@ -1,0 +1,137 @@
+{
+  "protocol": "manuscript_fig3_curvature_density_factorial",
+  "sweep_parameter": "condition",
+  "n_replicates": 8,
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0
+  },
+  "geometry_conditions": [
+    {
+      "label": "planar",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": null,
+        "axis": "y",
+        "vertex_z_m": 50e-9,
+        "name": "planar_sheet"
+      },
+      "metadata": {
+        "radius_m": null,
+        "curvature_m_inv": 0.0
+      }
+    },
+    {
+      "label": "R200nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 200e-9,
+        "axis": "y",
+        "vertex_z_m": 43.77757868236459e-9,
+        "name": "sheet_R200nm"
+      },
+      "metadata": {
+        "radius_m": 200e-9,
+        "curvature_m_inv": 5e6
+      }
+    },
+    {
+      "label": "R100nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "sheet_R100nm"
+      },
+      "metadata": {
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7
+      }
+    },
+    {
+      "label": "R65nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 65e-9,
+        "axis": "y",
+        "vertex_z_m": 27.12778180725873e-9,
+        "name": "sheet_R65nm"
+      },
+      "metadata": {
+        "radius_m": 65e-9,
+        "curvature_m_inv": 1.5384615384615385e7
+      }
+    },
+    {
+      "label": "R49p5nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 49.5e-9,
+        "axis": "y",
+        "vertex_z_m": 0.5e-9,
+        "name": "sheet_semicircular"
+      },
+      "metadata": {
+        "radius_m": 49.5e-9,
+        "curvature_m_inv": 2.02020202020202e7
+      }
+    }
+  ],
+  "parameter_conditions": [
+    {
+      "label": "density_1e15",
+      "params_overrides": {
+        "receptor_density_m2": 1e15,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "receptor_density_m2": 1e15
+      }
+    },
+    {
+      "label": "density_3e15",
+      "params_overrides": {
+        "receptor_density_m2": 3e15,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "receptor_density_m2": 3e15
+      }
+    },
+    {
+      "label": "density_1e16",
+      "params_overrides": {
+        "receptor_density_m2": 1e16,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "receptor_density_m2": 1e16
+      }
+    },
+    {
+      "label": "density_3e16",
+      "params_overrides": {
+        "receptor_density_m2": 3e16,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "receptor_density_m2": 3e16
+      }
+    },
+    {
+      "label": "density_1e17",
+      "params_overrides": {
+        "receptor_density_m2": 1e17,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "receptor_density_m2": 1e17
+      }
+    }
+  ]
+}

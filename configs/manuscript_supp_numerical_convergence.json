@@ -1,0 +1,167 @@
+{
+  "protocol": "manuscript_supp_numerical_convergence",
+  "sweep_parameter": "numerical_condition",
+  "n_replicates": 4,
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0
+  },
+  "conditions": [
+    {
+      "label": "baseline",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "numerical_baseline"
+      },
+      "metadata": {
+        "test_parameter": "baseline",
+        "test_value": 1.0
+      }
+    },
+    {
+      "label": "escape_z_65nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "escape_z_65nm"
+      },
+      "assay_overrides": {
+        "escape_z_m": 65e-9
+      },
+      "metadata": {
+        "test_parameter": "escape_z_m",
+        "test_value": 65e-9
+      }
+    },
+    {
+      "label": "escape_z_90nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "escape_z_90nm"
+      },
+      "assay_overrides": {
+        "escape_z_m": 90e-9
+      },
+      "metadata": {
+        "test_parameter": "escape_z_m",
+        "test_value": 90e-9
+      }
+    },
+    {
+      "label": "lattice_0p5nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.62926315716482e-9,
+        "name": "lattice_0p5nm"
+      },
+      "params_overrides": {
+        "a_m": 0.5e-9
+      },
+      "metadata": {
+        "test_parameter": "a_m",
+        "test_value": 0.5e-9
+      }
+    },
+    {
+      "label": "lattice_2nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 37.17978927623783e-9,
+        "name": "lattice_2nm"
+      },
+      "params_overrides": {
+        "a_m": 2e-9
+      },
+      "metadata": {
+        "test_parameter": "a_m",
+        "test_value": 2e-9
+      }
+    },
+    {
+      "label": "domain_50nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 46.95080210383422e-9,
+        "name": "domain_50nm"
+      },
+      "params_overrides": {
+        "Lx_m": 50e-9,
+        "Ly_m": 50e-9
+      },
+      "metadata": {
+        "test_parameter": "lateral_domain_m",
+        "test_value": 50e-9
+      }
+    },
+    {
+      "label": "domain_150nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 16.64789789349533e-9,
+        "name": "domain_150nm"
+      },
+      "params_overrides": {
+        "Lx_m": 150e-9,
+        "Ly_m": 150e-9
+      },
+      "metadata": {
+        "test_parameter": "lateral_domain_m",
+        "test_value": 150e-9
+      }
+    },
+    {
+      "label": "max_time_2000s",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "max_time_2000s"
+      },
+      "assay_overrides": {
+        "max_time_s": 2000.0
+      },
+      "metadata": {
+        "test_parameter": "max_time_s",
+        "test_value": 2000.0
+      }
+    },
+    {
+      "label": "max_time_50000s",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "max_time_50000s"
+      },
+      "assay_overrides": {
+        "max_time_s": 50000.0
+      },
+      "metadata": {
+        "test_parameter": "max_time_s",
+        "test_value": 50000.0
+      }
+    }
+  ]
+}

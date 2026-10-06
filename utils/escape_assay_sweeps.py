@@ -79,6 +79,15 @@ def validate_assay_settings(settings: dict) -> dict:
         normalized["escape_z_m"] = float(normalized["escape_z_m"])
     if normalized.get("escape_distance_m") is not None:
         normalized["escape_distance_m"] = float(normalized["escape_distance_m"])
+    normalized["start_bound"] = bool(normalized.get("start_bound", True))
+    normalized["rebinding_k_on_multiplier"] = float(
+        normalized.get("rebinding_k_on_multiplier", 1.0)
+    )
+    if (
+        not np.isfinite(normalized["rebinding_k_on_multiplier"])
+        or normalized["rebinding_k_on_multiplier"] < 0
+    ):
+        raise ValueError("rebinding_k_on_multiplier must be finite and nonnegative.")
     return normalized
 
 
@@ -184,6 +193,10 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             escape_z_m=assay.get("escape_z_m"),
             receptor_face_ids=receptor_faces,
             seed=int(task["trajectory_seed"]),
+            start_bound=bool(assay.get("start_bound", True)),
+            rebinding_k_on_multiplier=float(
+                assay.get("rebinding_k_on_multiplier", 1.0)
+            ),
         )
         receptor_summary = summarize_receptor_trajectories(result)
         if geometry_type == "sinusoidal_height_field":

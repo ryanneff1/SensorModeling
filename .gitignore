@@ -2,7 +2,9 @@ data
 results
 analysis_tools
 utils/__pycache__/
+utils/fea_capture.py
 info
 .vscode
 run_biosensor_mc.ipynb
 run_escape_assay.ipynb
+run_fea_capture.ipynb
