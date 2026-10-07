@@ -60,6 +60,8 @@ def export_escape_assay_run(
     *,
     receptor_summary: Optional[pd.DataFrame] = None,
     run_metadata: Optional[dict] = None,
+    include_survival: bool = True,
+    compact_trajectories: bool = False,
 ) -> Path:
     """Export tables and exact geometry needed to reproduce assay plots.
 
@@ -74,8 +76,20 @@ def export_escape_assay_run(
     if receptor_summary is None:
         receptor_summary = summarize_receptor_trajectories(result)
 
-    result.trajectories.to_csv(directory / "trajectories.csv.gz", index=False)
-    result.survival.to_csv(directory / "survival.csv.gz", index=False)
+    trajectories = result.trajectories
+    if compact_trajectories:
+        compact_columns = [
+            "location_id", "trial_id", "escaped", "censored",
+            "escape_time_s", "observation_time_s", "n_rebindings",
+            "n_self_rebindings", "n_cross_rebindings",
+            "total_bound_time_s", "background_occupancy_fraction",
+        ]
+        trajectories = trajectories[
+            [column for column in compact_columns if column in trajectories.columns]
+        ]
+    trajectories.to_csv(directory / "trajectories.csv.gz", index=False)
+    if include_survival:
+        result.survival.to_csv(directory / "survival.csv.gz", index=False)
     result.releases.to_csv(directory / "release_locations.csv", index=False)
     result.receptors.to_csv(directory / "receptors.csv", index=False)
     receptor_summary.to_csv(directory / "receptor_summary.csv", index=False)
@@ -105,12 +119,14 @@ def export_escape_assay_run(
         "files": {
             "geometry": "geometry.npz",
             "trajectories": "trajectories.csv.gz",
-            "survival": "survival.csv.gz",
             "releases": "release_locations.csv",
             "receptors": "receptors.csv",
             "receptor_summary": "receptor_summary.csv",
         },
     }
+    if include_survival:
+        metadata["files"]["survival"] = "survival.csv.gz"
+    metadata["compact_trajectories"] = bool(compact_trajectories)
     if run_metadata is not None:
         metadata["run_metadata"] = dict(run_metadata)
     with (directory / "manifest.json").open("w", encoding="utf-8") as stream:
@@ -160,7 +176,11 @@ def load_escape_assay_run(input_directory) -> EscapeAssayArchive:
         params=params,
         geometry=geometry,
         trajectories=pd.read_csv(directory / files["trajectories"]),
-        survival=pd.read_csv(directory / files["survival"]),
+        survival=(
+            pd.read_csv(directory / files["survival"])
+            if files.get("survival") is not None
+            else pd.DataFrame()
+        ),
         releases=pd.read_csv(directory / files["releases"]),
         receptors=pd.read_csv(directory / files["receptors"]),
         receptor_summary=pd.read_csv(directory / files["receptor_summary"]),
@@ -324,6 +344,7 @@ def plot_surface_metric_3d(
     coordinate_unit: str = "nm",
     show_receptors: bool = True,
     receptor_size: float = 5.0,
+    colorbar_pad: float = 0.08,
     elev: float = 28.0,
     azim: float = -55.0,
     figsize: tuple[float, float] = (9.0, 7.0),
@@ -401,7 +422,9 @@ def plot_surface_metric_3d(
     ax.view_init(elev=elev, azim=azim)
     scalar_mappable = plt.cm.ScalarMappable(norm=norm, cmap=colormap)
     scalar_mappable.set_array(values)
-    colorbar = fig.colorbar(scalar_mappable, ax=ax, shrink=0.68, pad=0.08)
+    colorbar = fig.colorbar(
+        scalar_mappable, ax=ax, shrink=0.68, pad=float(colorbar_pad)
+    )
     colorbar.set_label(colorbar_label or metric.replace("_", " "))
     return fig, ax, interpolated
 

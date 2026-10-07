@@ -1,0 +1,142 @@
+{
+  "protocol": "manuscript_fig3_response_grid",
+  "sweep_parameter": "background_occupancy_fraction",
+  "n_replicates": 8,
+  "export": {
+    "include_survival": false,
+    "compact_trajectories": true
+  },
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0
+  },
+  "background_occupancy_values": [
+    0.00,
+    0.05,
+    0.10,
+    0.15,
+    0.20,
+    0.25,
+    0.30,
+    0.35,
+    0.40,
+    0.45,
+    0.50,
+    0.55,
+    0.60,
+    0.65,
+    0.70,
+    0.75,
+    0.80,
+    0.85,
+    0.90,
+    0.95,
+    1.00
+  ],
+  "geometry_conditions": [
+    {
+      "label": "planar_low_density",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": null,
+        "axis": "y",
+        "vertex_z_m": 50e-9,
+        "name": "planar_low_density"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e15,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "radius_m": null,
+        "curvature_m_inv": 0.0,
+        "receptor_density_m2": 1e15
+      }
+    },
+    {
+      "label": "planar_high_density",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": null,
+        "axis": "y",
+        "vertex_z_m": 50e-9,
+        "name": "planar_high_density"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e17,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "radius_m": null,
+        "curvature_m_inv": 0.0,
+        "receptor_density_m2": 1e17
+      }
+    },
+    {
+      "label": "R100nm_mid_density",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "R100nm_mid_density"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e16,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7,
+        "receptor_density_m2": 1e16
+      }
+    },
+    {
+      "label": "semicircular_low_density",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 49.5e-9,
+        "axis": "y",
+        "vertex_z_m": 0.5e-9,
+        "name": "semicircular_low_density"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e15,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "radius_m": 49.5e-9,
+        "curvature_m_inv": 2.02020202020202e7,
+        "receptor_density_m2": 1e15
+      }
+    },
+    {
+      "label": "semicircular_high_density",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 49.5e-9,
+        "axis": "y",
+        "vertex_z_m": 0.5e-9,
+        "name": "semicircular_high_density"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e17,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "radius_m": 49.5e-9,
+        "curvature_m_inv": 2.02020202020202e7,
+        "receptor_density_m2": 1e17
+      }
+    }
+  ],
+  "parameter_conditions": [
+    {
+      "label": "baseline"
+    }
+  ]
+}

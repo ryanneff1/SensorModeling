@@ -88,6 +88,11 @@ def validate_assay_settings(settings: dict) -> dict:
         or normalized["rebinding_k_on_multiplier"] < 0
     ):
         raise ValueError("rebinding_k_on_multiplier must be finite and nonnegative.")
+    normalized["background_occupancy_fraction"] = float(
+        normalized.get("background_occupancy_fraction", 0.0)
+    )
+    if not 0 <= normalized["background_occupancy_fraction"] <= 1:
+        raise ValueError("background_occupancy_fraction must lie in [0, 1].")
     return normalized
 
 
@@ -197,6 +202,9 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             rebinding_k_on_multiplier=float(
                 assay.get("rebinding_k_on_multiplier", 1.0)
             ),
+            background_occupancy_fraction=float(
+                assay.get("background_occupancy_fraction", 0.0)
+            ),
         )
         receptor_summary = summarize_receptor_trajectories(result)
         if geometry_type == "sinusoidal_height_field":
@@ -244,6 +252,10 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             run_directory,
             receptor_summary=receptor_summary,
             run_metadata=metadata,
+            include_survival=bool(task.get("export", {}).get("include_survival", True)),
+            compact_trajectories=bool(
+                task.get("export", {}).get("compact_trajectories", False)
+            ),
         )
         return {
             "status": "completed",

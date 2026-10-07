@@ -325,6 +325,7 @@ def run_escape_assay(
     seed: Optional[int] = None,
     start_bound: bool = True,
     rebinding_k_on_multiplier: float = 1.0,
+    background_occupancy_fraction: float = 0.0,
 ) -> EscapeAssayResult:
     """Run independent single-molecule release trajectories.
 
@@ -368,6 +369,14 @@ def run_escape_assay(
         of zero disables rebinding while preserving the intrinsic ``k_on`` and
         ``k_off`` stored in ``P`` for classical-affinity comparisons. The
         default of one uses the unmodified microscopic binding rule.
+    background_occupancy_fraction
+        Fraction of receptors treated as occupied by implicit background
+        ligands during each free excursion. Availability is a deterministic
+        Bernoulli draw for every trajectory/receptor/excursion tuple, so a
+        receptor cannot flicker between occupied and free on diffusion-step
+        timescales. The receptor just vacated by the tagged ligand is forced
+        available. A new background field is sampled after every subsequent
+        dissociation. Zero recovers the dilute-limit assay.
 
     Notes
     -----
@@ -387,6 +396,12 @@ def run_escape_assay(
         raise ValueError("max_time_s must be positive.")
     if not np.isfinite(rebinding_k_on_multiplier) or rebinding_k_on_multiplier < 0:
         raise ValueError("rebinding_k_on_multiplier must be finite and nonnegative.")
+    if (
+        not np.isfinite(background_occupancy_fraction)
+        or background_occupancy_fraction < 0
+        or background_occupancy_fraction > 1
+    ):
+        raise ValueError("background_occupancy_fraction must lie in [0, 1].")
     if not release_locations:
         raise ValueError("release_locations must contain at least one location.")
     if len({location.label for location in release_locations}) != len(release_locations):
@@ -428,6 +443,8 @@ def run_escape_assay(
     xyz = release_xyz[location_ids].copy()
     source_face_per_molecule = source_faces[location_ids]
     bound_receptor = np.full(n_total, -1, dtype=np.int64)
+    last_released_receptor = np.full(n_total, -1, dtype=np.int64)
+    free_excursion_id = np.zeros(n_total, dtype=np.uint64)
     started_bound = np.zeros(n_total, dtype=bool)
     if start_bound:
         # Source faces are forced into the receptor layout. If multiple
@@ -502,6 +519,8 @@ def run_escape_assay(
             elapsed_steps[completed_ids] += completed_dwell
             receptor_ids = bound_receptor[completed_ids]
             xyz[completed_ids] = receptor_release_xyz[receptor_ids]
+            last_released_receptor[completed_ids] = receptor_ids
+            free_excursion_id[completed_ids] += np.uint64(1)
             bound_receptor[completed_ids] = -1
             n_unbindings[completed_ids] += 1
 
@@ -516,6 +535,46 @@ def run_escape_assay(
     # is advanced before any free diffusion, and is not counted as rebinding.
     advance_bound_intervals(np.flatnonzero(active & (bound_receptor >= 0)))
     active[active & (bound_receptor < 0) & (elapsed_steps >= n_steps)] = False
+    hash_seed = np.uint64(
+        (int(P.seed if seed is None else seed) & 0xFFFFFFFF) + 1
+    )
+
+    def receptor_is_available(
+        molecule_ids: np.ndarray, receptor_ids: np.ndarray
+    ) -> np.ndarray:
+        """Persistent Bernoulli availability without a dense mask."""
+
+        if background_occupancy_fraction <= 0:
+            return np.ones((molecule_ids.size, receptor_ids.size), dtype=bool)
+        if background_occupancy_fraction >= 1:
+            available = np.zeros(
+                (molecule_ids.size, receptor_ids.size), dtype=bool
+            )
+        else:
+            molecule_values = molecule_ids.astype(np.uint64)[:, None]
+            receptor_values = receptor_ids.astype(np.uint64)[None, :]
+            excursion_values = free_excursion_id[molecule_ids, None]
+            values = (
+                molecule_values * np.uint64(0x9E3779B185EBCA87)
+                + receptor_values * np.uint64(0xC2B2AE3D27D4EB4F)
+                + excursion_values * np.uint64(0x165667B19E3779F9)
+                + hash_seed
+            )
+            values ^= values >> np.uint64(30)
+            values *= np.uint64(0xBF58476D1CE4E5B9)
+            values ^= values >> np.uint64(27)
+            values *= np.uint64(0x94D049BB133111EB)
+            values ^= values >> np.uint64(31)
+            uniforms = (values >> np.uint64(11)).astype(np.float64) * (
+                1.0 / 9007199254740992.0
+            )
+            available = uniforms >= float(background_occupancy_fraction)
+        available |= (
+            receptor_ids[None, :]
+            == last_released_receptor[molecule_ids, None]
+        )
+        return available
+
     while np.any(active):
         free_ids = np.flatnonzero(active & (bound_receptor < 0))
         if free_ids.size == 0:
@@ -608,11 +667,23 @@ def run_escape_assay(
                 if receptors_here is None:
                     continue
                 candidates = bindable_ids[free_sites == site]
-                p_bind = 1.0 - np.exp(-rebinding_exponent * receptors_here.size)
-                binding_ids = candidates[rng.random(candidates.size) < p_bind]
+                availability = receptor_is_available(candidates, receptors_here)
+                n_available = availability.sum(axis=1)
+                p_bind = 1.0 - np.exp(-rebinding_exponent * n_available)
+                binds = rng.random(candidates.size) < p_bind
+                binding_ids = candidates[binds]
                 if binding_ids.size == 0:
                     continue
-                selected = receptors_here[rng.integers(receptors_here.size, size=binding_ids.size)]
+                binding_availability = availability[binds]
+                random_ranks = (
+                    rng.random(binding_ids.size)
+                    * n_available[binds]
+                ).astype(np.int64)
+                cumulative = np.cumsum(binding_availability, axis=1)
+                selected_columns = np.argmax(
+                    cumulative > random_ranks[:, None], axis=1
+                )
+                selected = receptors_here[selected_columns]
                 bound_receptor[binding_ids] = selected
                 n_bindings[binding_ids] += 1
                 has_source = source_face_per_molecule[binding_ids] >= 0
@@ -648,6 +719,7 @@ def run_escape_assay(
         "observation_time_s": observation_time,
         "escape_reason": escape_reason,
         "started_bound": started_bound,
+        "background_occupancy_fraction": float(background_occupancy_fraction),
         "n_bound_intervals": n_bindings + started_bound.astype(np.int64),
         "n_bindings": n_bindings,
         "n_rebindings": n_bindings,

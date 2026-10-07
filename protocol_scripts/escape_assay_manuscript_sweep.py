@@ -49,36 +49,64 @@ def _expand_conditions(config: dict) -> list[dict[str, Any]]:
     if explicit is not None:
         if not isinstance(explicit, list) or not explicit:
             raise ValueError("conditions must be a nonempty list.")
-        return [dict(value) for value in explicit]
+        conditions = [dict(value) for value in explicit]
+    else:
+        geometries = config.get("geometry_conditions", [])
+        parameters = config.get("parameter_conditions", [{}])
+        if not geometries or not isinstance(geometries, list):
+            raise ValueError("geometry_conditions must be a nonempty list.")
+        if not parameters or not isinstance(parameters, list):
+            raise ValueError("parameter_conditions must be a nonempty list.")
+        conditions = []
+        for geometry_condition in geometries:
+            for parameter_condition in parameters:
+                geometry_label = str(geometry_condition["label"])
+                parameter_label = str(parameter_condition.get("label", "baseline"))
+                conditions.append(
+                    {
+                        "label": f"{geometry_label}__{parameter_label}",
+                        "geometry_type": geometry_condition["geometry_type"],
+                        "geometry": geometry_condition["geometry"],
+                        "params_overrides": _merged(
+                            geometry_condition.get("params_overrides", {}),
+                            parameter_condition.get("params_overrides", {}),
+                        ),
+                        "assay_overrides": _merged(
+                            geometry_condition.get("assay_overrides", {}),
+                            parameter_condition.get("assay_overrides", {}),
+                        ),
+                        "metadata": _merged(
+                            geometry_condition.get("metadata", {}),
+                            parameter_condition.get("metadata", {}),
+                        ),
+                    }
+                )
 
-    geometries = config.get("geometry_conditions", [])
-    parameters = config.get("parameter_conditions", [{}])
-    if not geometries or not isinstance(geometries, list):
-        raise ValueError("geometry_conditions must be a nonempty list.")
-    if not parameters or not isinstance(parameters, list):
-        raise ValueError("parameter_conditions must be a nonempty list.")
-    conditions = []
-    for geometry_condition in geometries:
-        for parameter_condition in parameters:
-            geometry_label = str(geometry_condition["label"])
-            parameter_label = str(parameter_condition.get("label", "baseline"))
-            conditions.append(
-                {
-                    "label": f"{geometry_label}__{parameter_label}",
-                    "geometry_type": geometry_condition["geometry_type"],
-                    "geometry": geometry_condition["geometry"],
-                    "params_overrides": parameter_condition.get(
-                        "params_overrides", {}
-                    ),
-                    "assay_overrides": parameter_condition.get(
-                        "assay_overrides", {}
-                    ),
-                    "metadata": _merged(
-                        geometry_condition.get("metadata", {}),
-                        parameter_condition.get("metadata", {}),
-                    ),
-                }
+    occupancy_values = config.get("background_occupancy_values")
+    if occupancy_values is not None:
+        values = [float(value) for value in occupancy_values]
+        if not values or len(set(values)) != len(values):
+            raise ValueError(
+                "background_occupancy_values must be a nonempty unique list."
             )
+        if any(value < 0 or value > 1 for value in values):
+            raise ValueError("Background occupancies must lie in [0, 1].")
+        expanded = []
+        for condition in conditions:
+            for occupancy in values:
+                token = f"{occupancy:.2f}".replace(".", "p")
+                value = dict(condition)
+                value["label"] = f"{condition['label']}__occupancy_{token}"
+                value["assay_overrides"] = _merged(
+                    condition.get("assay_overrides", {}),
+                    {"background_occupancy_fraction": occupancy},
+                )
+                value["metadata"] = _merged(
+                    condition.get("metadata", {}),
+                    {"background_occupancy_fraction": occupancy},
+                )
+                expanded.append(value)
+        conditions = expanded
     return conditions
 
 
@@ -92,6 +120,7 @@ def main() -> None:
         raise ValueError("n_replicates must be at least one.")
     base_assay = dict(config.get("assay", {}))
     conditions = _expand_conditions(config)
+    export_settings = dict(config.get("export", {}))
     valid_params = {field.name for field in fields(type(base_params))}
     labels = [str(condition["label"]) for condition in conditions]
     if len(set(labels)) != len(labels):
@@ -149,6 +178,7 @@ def main() -> None:
                     "geometry": geometry,
                     "assay": assay,
                     "condition_metadata": metadata,
+                    "export": export_settings,
                     "run_directory": str(
                         output_root / label / f"replicate_{replicate:03d}"
                     ),
