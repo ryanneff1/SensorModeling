@@ -5,9 +5,11 @@ analysis_tools
 analysis_tools/*
 !analysis_tools/manuscript_escape_analysis.py
 !analysis_tools/build_manuscript_escape_notebooks.py
+!analysis_tools/build_final_low_concentration_notebook.py
 !analysis_tools/analyze_manuscript_figure2_rebinding_affinity.ipynb
 !analysis_tools/analyze_manuscript_figure3_curvature_density.ipynb
 !analysis_tools/analyze_manuscript_figure4_local_curvature.ipynb
+!analysis_tools/analyze_manuscript_final_low_concentration.ipynb
 !analysis_tools/analyze_manuscript_supp_numerical_convergence.ipynb
 !analysis_tools/analyze_manuscript_supp_mechanistic_controls.ipynb
 utils/__pycache__/

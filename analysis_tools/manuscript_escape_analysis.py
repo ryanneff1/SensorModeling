@@ -20,10 +20,24 @@ def _cloud_timeout_message(path: Path) -> str:
     )
 
 
-def discover_runs(root: str | Path) -> pd.DataFrame:
-    """Index every completed escape-assay bundle below *root*."""
+def discover_runs(
+    root: str | Path,
+    *,
+    cache_path: str | Path | None = None,
+    refresh_cache: bool = False,
+) -> pd.DataFrame:
+    """Index every completed escape-assay bundle below *root*.
+
+    An optional CSV cache avoids rescanning large cloud-backed directory
+    trees after the first successful discovery pass.
+    """
 
     root = Path(root).expanduser().resolve()
+    cache = None if cache_path is None else Path(cache_path).expanduser().resolve()
+    if cache is not None and cache.exists() and not refresh_cache:
+        cached = pd.read_csv(cache)
+        cached["run_directory"] = cached["run_directory"].map(Path)
+        return cached
     rows = []
     for manifest_path in sorted(root.rglob("manifest.json")):
         try:
@@ -68,6 +82,10 @@ def discover_runs(root: str | Path) -> pd.DataFrame:
             "background_occupancy_fraction": float(
                 assay.get("background_occupancy_fraction", 0.0)
             ),
+            "rebinding_mode": str(assay.get("rebinding_mode", "all")),
+            "rebinding_classification": str(
+                assay.get("rebinding_classification", "source_receptor")
+            ),
         }
         row["KD_classical_M"] = (
             row["k_off_s"] / row["k_on_M_inv_s"]
@@ -81,10 +99,14 @@ def discover_runs(root: str | Path) -> pd.DataFrame:
         rows.append(row)
     if not rows:
         raise FileNotFoundError(f"No escape-assay manifests found below {root}")
-    return pd.DataFrame(rows).sort_values(
+    result = pd.DataFrame(rows).sort_values(
         ["condition_index", "condition_label", "replicate"],
         na_position="last",
     ).reset_index(drop=True)
+    if cache is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(cache, index=False)
+    return result
 
 
 def load_trajectories(run_directory: str | Path) -> pd.DataFrame:
@@ -99,12 +121,46 @@ def load_trajectories(run_directory: str | Path) -> pd.DataFrame:
     return frame
 
 
-def summarize_replicates(run_index: pd.DataFrame) -> pd.DataFrame:
-    """Create one statistically independent summary row per replicate."""
+def summarize_replicates(
+    run_index: pd.DataFrame,
+    *,
+    cache_path: str | Path | None = None,
+    refresh_cache: bool = False,
+) -> pd.DataFrame:
+    """Create one statistically independent summary row per replicate.
+
+    When ``cache_path`` is supplied, the completed table is stored as a CSV
+    and reused on later calls. This is especially useful for occupancy grids
+    containing hundreds of compressed trajectory archives.
+    """
+
+    cache = None if cache_path is None else Path(cache_path).expanduser().resolve()
+    if cache is not None and cache.exists() and not refresh_cache:
+        return pd.read_csv(cache)
 
     rows = []
     for run in run_index.to_dict("records"):
-        trajectories = load_trajectories(run["run_directory"])
+        trajectory_path = Path(run["run_directory"]) / "trajectories.csv.gz"
+        required_columns = [
+            "escaped",
+            "censored",
+            "observation_time_s",
+            "total_bound_time_s",
+            "n_rebindings",
+        ]
+        optional_columns = ["n_self_rebindings", "n_cross_rebindings"]
+        try:
+            available_columns = pd.read_csv(trajectory_path, nrows=0).columns
+            usecols = required_columns + [
+                column for column in optional_columns if column in available_columns
+            ]
+            trajectories = pd.read_csv(trajectory_path, usecols=usecols)
+        except TimeoutError as exc:
+            raise TimeoutError(_cloud_timeout_message(trajectory_path)) from exc
+        trajectories["free_time_s"] = (
+            trajectories["observation_time_s"]
+            - trajectories["total_bound_time_s"]
+        ).clip(lower=0)
         mean_bound = float(trajectories["total_bound_time_s"].mean())
         summary = dict(run)
         summary.update(
@@ -137,8 +193,30 @@ def summarize_replicates(run_index: pd.DataFrame) -> pd.DataFrame:
             if summary["KD_apparent_M"] > 0
             else np.nan
         )
+        if "n_self_rebindings" in trajectories:
+            summary["mean_self_rebindings"] = float(
+                trajectories["n_self_rebindings"].mean()
+            )
+        if "n_cross_rebindings" in trajectories:
+            summary["mean_cross_rebindings"] = float(
+                trajectories["n_cross_rebindings"].mean()
+            )
+        if {"n_self_rebindings", "n_cross_rebindings"}.issubset(trajectories):
+            total = (
+                trajectories["n_self_rebindings"]
+                + trajectories["n_cross_rebindings"]
+            ).sum()
+            summary["cross_rebinding_fraction"] = (
+                float(trajectories["n_cross_rebindings"].sum() / total)
+                if total > 0
+                else 0.0
+            )
         rows.append(summary)
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    if cache is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(cache, index=False)
+    return result
 
 
 def load_receptor_summaries(run_index: pd.DataFrame) -> pd.DataFrame:
