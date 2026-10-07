@@ -91,10 +91,26 @@ def _expand_conditions(config: dict) -> list[dict[str, Any]]:
             )
         if any(value < 0 or value > 1 for value in values):
             raise ValueError("Background occupancies must lie in [0, 1].")
+        # Retain the historical two-decimal directory names whenever they are
+        # unique (and therefore preserve paths used by existing manuscript
+        # sweeps). Log-spaced dilute grids need more precision: for example,
+        # 1e-6 and 1e-5 would otherwise both become ``occupancy_0p00``.
+        tokens = [f"{value:.2f}".replace(".", "p") for value in values]
+        if len(set(tokens)) != len(tokens):
+            tokens = [
+                f"{value:.12g}"
+                .replace(".", "p")
+                .replace("+", "")
+                .replace("-", "m")
+                for value in values
+            ]
+        if len(set(tokens)) != len(tokens):
+            raise ValueError(
+                "Background occupancies could not be assigned unique labels."
+            )
         expanded = []
         for condition in conditions:
-            for occupancy in values:
-                token = f"{occupancy:.2f}".replace(".", "p")
+            for occupancy, token in zip(values, tokens):
                 value = dict(condition)
                 value["label"] = f"{condition['label']}__occupancy_{token}"
                 value["assay_overrides"] = _merged(
