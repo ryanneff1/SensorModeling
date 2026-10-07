@@ -93,6 +93,22 @@ def validate_assay_settings(settings: dict) -> dict:
     )
     if not 0 <= normalized["background_occupancy_fraction"] <= 1:
         raise ValueError("background_occupancy_fraction must lie in [0, 1].")
+    normalized["rebinding_mode"] = str(
+        normalized.get("rebinding_mode", "all")
+    ).lower()
+    if normalized["rebinding_mode"] not in {"all", "self_only"}:
+        raise ValueError("rebinding_mode must be 'all' or 'self_only'.")
+    normalized["rebinding_classification"] = str(
+        normalized.get("rebinding_classification", "source_receptor")
+    ).lower()
+    if normalized["rebinding_classification"] not in {
+        "source_receptor",
+        "last_released_receptor",
+    }:
+        raise ValueError(
+            "rebinding_classification must be 'source_receptor' or "
+            "'last_released_receptor'."
+        )
     return normalized
 
 
@@ -204,6 +220,10 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             ),
             background_occupancy_fraction=float(
                 assay.get("background_occupancy_fraction", 0.0)
+            ),
+            rebinding_mode=str(assay.get("rebinding_mode", "all")),
+            rebinding_classification=str(
+                assay.get("rebinding_classification", "source_receptor")
             ),
         )
         receptor_summary = summarize_receptor_trajectories(result)

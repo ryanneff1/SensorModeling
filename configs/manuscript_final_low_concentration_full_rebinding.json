@@ -1,0 +1,91 @@
+{
+  "protocol": "manuscript_final_low_concentration_full_rebinding",
+  "sweep_parameter": "background_occupancy_fraction",
+  "n_replicates": 8,
+  "export": {
+    "include_survival": false,
+    "compact_trajectories": true
+  },
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0,
+    "rebinding_mode": "all",
+    "rebinding_classification": "last_released_receptor"
+  },
+  "background_occupancy_values": [
+    1e-6,
+    1.77827941004e-6,
+    3.16227766017e-6,
+    5.6234132519e-6,
+    1e-5,
+    1.77827941004e-5,
+    3.16227766017e-5,
+    5.6234132519e-5,
+    1e-4,
+    1.77827941004e-4,
+    3.16227766017e-4,
+    5.6234132519e-4,
+    1e-3,
+    1.77827941004e-3,
+    3.16227766017e-3,
+    5.6234132519e-3,
+    1e-2,
+    1.77827941004e-2,
+    3.16227766017e-2,
+    5.6234132519e-2,
+    1e-1
+  ],
+  "geometry_conditions": [
+    {
+      "label": "planar",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": null,
+        "axis": "y",
+        "vertex_z_m": 50e-9,
+        "name": "planar_sheet"
+      },
+      "metadata": {
+        "radius_m": null,
+        "curvature_m_inv": 0.0
+      }
+    },
+    {
+      "label": "R100nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "sheet_R100nm"
+      },
+      "metadata": {
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7
+      }
+    },
+    {
+      "label": "R49p5nm",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 49.5e-9,
+        "axis": "y",
+        "vertex_z_m": 0.5e-9,
+        "name": "sheet_semicircular"
+      },
+      "metadata": {
+        "radius_m": 49.5e-9,
+        "curvature_m_inv": 2.02020202020202e7
+      }
+    }
+  ],
+  "parameter_conditions": [
+    {
+      "label": "full_rebinding"
+    }
+  ]
+}

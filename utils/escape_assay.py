@@ -326,6 +326,8 @@ def run_escape_assay(
     start_bound: bool = True,
     rebinding_k_on_multiplier: float = 1.0,
     background_occupancy_fraction: float = 0.0,
+    rebinding_mode: str = "all",
+    rebinding_classification: str = "source_receptor",
 ) -> EscapeAssayResult:
     """Run independent single-molecule release trajectories.
 
@@ -377,6 +379,18 @@ def run_escape_assay(
         timescales. The receptor just vacated by the tagged ligand is forced
         available. A new background field is sampled after every subsequent
         dissociation. Zero recovers the dilute-limit assay.
+    rebinding_mode
+        ``"all"`` (default) permits binding to every available receptor and
+        preserves the behavior of earlier assays. ``"self_only"`` permits
+        rebinding only to the receptor most recently vacated by the tagged
+        ligand, providing a control in which cross-receptor transfer is
+        disabled without suppressing local return to the same receptor.
+    rebinding_classification
+        Reference used to label recorded self- and cross-rebindings.
+        ``"source_receptor"`` is the backward-compatible behavior used by
+        earlier sweeps. ``"last_released_receptor"`` classifies each event
+        relative to the receptor vacated immediately before that free
+        excursion and is preferred for mechanistic self/cross analyses.
 
     Notes
     -----
@@ -402,6 +416,18 @@ def run_escape_assay(
         or background_occupancy_fraction > 1
     ):
         raise ValueError("background_occupancy_fraction must lie in [0, 1].")
+    rebinding_mode = str(rebinding_mode).lower()
+    if rebinding_mode not in {"all", "self_only"}:
+        raise ValueError("rebinding_mode must be 'all' or 'self_only'.")
+    rebinding_classification = str(rebinding_classification).lower()
+    if rebinding_classification not in {
+        "source_receptor",
+        "last_released_receptor",
+    }:
+        raise ValueError(
+            "rebinding_classification must be 'source_receptor' or "
+            "'last_released_receptor'."
+        )
     if not release_locations:
         raise ValueError("release_locations must contain at least one location.")
     if len({location.label for location in release_locations}) != len(release_locations):
@@ -668,6 +694,11 @@ def run_escape_assay(
                     continue
                 candidates = bindable_ids[free_sites == site]
                 availability = receptor_is_available(candidates, receptors_here)
+                if rebinding_mode == "self_only":
+                    availability &= (
+                        receptors_here[None, :]
+                        == last_released_receptor[candidates, None]
+                    )
                 n_available = availability.sum(axis=1)
                 p_bind = 1.0 - np.exp(-rebinding_exponent * n_available)
                 binds = rng.random(candidates.size) < p_bind
@@ -686,11 +717,18 @@ def run_escape_assay(
                 selected = receptors_here[selected_columns]
                 bound_receptor[binding_ids] = selected
                 n_bindings[binding_ids] += 1
-                has_source = source_face_per_molecule[binding_ids] >= 0
-                is_self = has_source & (
-                    receptor_faces[selected] == source_face_per_molecule[binding_ids]
-                )
-                is_cross = has_source & ~is_self
+                if rebinding_classification == "last_released_receptor":
+                    has_reference = last_released_receptor[binding_ids] >= 0
+                    is_self = has_reference & (
+                        selected == last_released_receptor[binding_ids]
+                    )
+                else:
+                    has_reference = source_face_per_molecule[binding_ids] >= 0
+                    is_self = has_reference & (
+                        receptor_faces[selected]
+                        == source_face_per_molecule[binding_ids]
+                    )
+                is_cross = has_reference & ~is_self
                 n_self[binding_ids[is_self]] += 1
                 n_cross[binding_ids[is_cross]] += 1
                 selected_faces = receptor_faces[selected]
@@ -720,6 +758,8 @@ def run_escape_assay(
         "escape_reason": escape_reason,
         "started_bound": started_bound,
         "background_occupancy_fraction": float(background_occupancy_fraction),
+        "rebinding_mode": rebinding_mode,
+        "rebinding_classification": rebinding_classification,
         "n_bound_intervals": n_bindings + started_bound.astype(np.int64),
         "n_bindings": n_bindings,
         "n_rebindings": n_bindings,
