@@ -19,6 +19,14 @@ from utils.escape_assay_sweeps import (
 )
 
 
+DEFAULT_RESPONSE_OCCUPANCY_GRID = {
+    "spacing": "logit",
+    "minimum": 1e-3,
+    "maximum": 1.0 - 1e-3,
+    "count": 51,
+}
+
+
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     value.add_argument("--params-json", type=Path, required=True)
@@ -44,6 +52,114 @@ def _normalize_geometry(condition: dict) -> dict:
     return geometry
 
 
+def _kinetic_parameter_conditions(config: dict) -> list[dict[str, Any]] | None:
+    """Expand compact, readable logarithmic kinetic-sweep definitions."""
+
+    sweeps = config.get("kinetic_sweeps")
+    if sweeps is None:
+        return None
+    if not isinstance(sweeps, list) or not sweeps:
+        raise ValueError("kinetic_sweeps must be a nonempty list.")
+
+    conditions: list[dict[str, Any]] = []
+    for sweep in sweeps:
+        parameter = str(sweep["parameter"])
+        if parameter not in {"k_on_M_inv_s", "k_off_s"}:
+            raise ValueError(
+                "Kinetic sweep parameter must be k_on_M_inv_s or k_off_s."
+            )
+        values = np.logspace(
+            float(sweep["log10_start"]),
+            float(sweep["log10_stop"]),
+            int(sweep["count"]),
+        )
+        fixed = {
+            key: float(value)
+            for key, value in dict(sweep.get("fixed_params_overrides", {})).items()
+        }
+        prefix = str(sweep.get("label", parameter))
+        for index, raw_value in enumerate(values):
+            value = float(raw_value)
+            params_overrides = dict(fixed)
+            params_overrides[parameter] = value
+            if "k_on_M_inv_s" not in params_overrides or "k_off_s" not in params_overrides:
+                raise ValueError(
+                    f"{prefix}: each generated condition must define both kinetic rates."
+                )
+            k_on = float(params_overrides["k_on_M_inv_s"])
+            k_off = float(params_overrides["k_off_s"])
+            assay_overrides = dict(sweep.get("assay_overrides", {}))
+            if "max_time_factor_over_k_off" in sweep:
+                factor = float(sweep["max_time_factor_over_k_off"])
+                if factor <= 0 or k_off <= 0:
+                    raise ValueError(
+                        "max_time_factor_over_k_off and k_off_s must be positive."
+                    )
+                assay_overrides["max_time_s"] = factor / k_off
+            conditions.append(
+                {
+                    "label": f"{prefix}_{index + 1:02d}",
+                    "params_overrides": params_overrides,
+                    "assay_overrides": assay_overrides,
+                    "metadata": {
+                        "kinetic_sweep_axis": parameter,
+                        "kinetic_sweep_index": index,
+                        "kinetic_sweep_value": value,
+                        "k_on_M_inv_s": k_on,
+                        "k_off_s": k_off,
+                        "KD_M": k_off / k_on,
+                        "max_time_s": float(assay_overrides.get("max_time_s", np.nan)),
+                    },
+                }
+            )
+    return conditions
+
+
+def _background_occupancy_values(config: dict) -> list[float] | None:
+    """Return explicit occupancies or construct the standard response grid."""
+
+    explicit = config.get("background_occupancy_values")
+    grid = config.get("background_occupancy_grid")
+    if explicit is not None and grid is not None:
+        raise ValueError(
+            "Use either background_occupancy_values or "
+            "background_occupancy_grid, not both."
+        )
+    if explicit is not None:
+        return [float(value) for value in explicit]
+    if grid is None:
+        if config.get("sweep_parameter") != "background_occupancy_fraction":
+            return None
+        grid = DEFAULT_RESPONSE_OCCUPANCY_GRID
+    if grid == "default":
+        grid = DEFAULT_RESPONSE_OCCUPANCY_GRID
+    if not isinstance(grid, dict):
+        raise ValueError("background_occupancy_grid must be an object or 'default'.")
+
+    spacing = str(grid.get("spacing", "logit")).lower()
+    minimum = float(grid.get("minimum", 1e-3))
+    maximum = float(grid.get("maximum", 1.0 - 1e-3))
+    count = int(grid.get("count", 51))
+    if not 0 < minimum < maximum < 1:
+        raise ValueError("Generated occupancy limits must satisfy 0 < min < max < 1.")
+    if count < 2:
+        raise ValueError("Generated occupancy grids require at least two values.")
+    if spacing == "logit":
+        endpoints = np.log(
+            np.asarray([minimum, maximum])
+            / (1.0 - np.asarray([minimum, maximum]))
+        )
+        logits = np.linspace(endpoints[0], endpoints[1], count)
+        values = 1.0 / (1.0 + np.exp(-logits))
+    elif spacing == "linear":
+        values = np.linspace(minimum, maximum, count)
+    elif spacing == "log":
+        values = np.geomspace(minimum, maximum, count)
+    else:
+        raise ValueError("Occupancy-grid spacing must be logit, linear, or log.")
+    return [float(value) for value in values]
+
+
 def _expand_conditions(config: dict) -> list[dict[str, Any]]:
     explicit = config.get("conditions")
     if explicit is not None:
@@ -52,7 +168,16 @@ def _expand_conditions(config: dict) -> list[dict[str, Any]]:
         conditions = [dict(value) for value in explicit]
     else:
         geometries = config.get("geometry_conditions", [])
-        parameters = config.get("parameter_conditions", [{}])
+        generated_parameters = _kinetic_parameter_conditions(config)
+        if generated_parameters is not None and "parameter_conditions" in config:
+            raise ValueError(
+                "Use either kinetic_sweeps or parameter_conditions, not both."
+            )
+        parameters = (
+            generated_parameters
+            if generated_parameters is not None
+            else config.get("parameter_conditions", [{}])
+        )
         if not geometries or not isinstance(geometries, list):
             raise ValueError("geometry_conditions must be a nonempty list.")
         if not parameters or not isinstance(parameters, list):
@@ -82,9 +207,9 @@ def _expand_conditions(config: dict) -> list[dict[str, Any]]:
                     }
                 )
 
-    occupancy_values = config.get("background_occupancy_values")
+    occupancy_values = _background_occupancy_values(config)
     if occupancy_values is not None:
-        values = [float(value) for value in occupancy_values]
+        values = occupancy_values
         if not values or len(set(values)) != len(values):
             raise ValueError(
                 "background_occupancy_values must be a nonempty unique list."

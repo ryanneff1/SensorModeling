@@ -1,0 +1,108 @@
+{
+  "protocol": "manuscript_fig3_density_kinetic_c50",
+  "sweep_parameter": "kinetic_condition",
+  "n_replicates": 5,
+
+  "export": {
+    "include_survival": false,
+    "compact_trajectories": true
+  },
+
+  "assay": {
+    "n_trials_per_location": 100,
+    "max_time_s": 10000.0,
+    "escape_mode": "z_plane",
+    "escape_z_m": 75e-9,
+    "start_bound": true,
+    "rebinding_k_on_multiplier": 1.0,
+    "background_occupancy_fraction": 0.5
+  },
+
+  "geometry_conditions": [
+    {
+      "label": "density_1e15",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "sheet_R100nm_density_1e15"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e15,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "surface_series": "receptor_density",
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7,
+        "receptor_density_m2": 1e15
+      }
+    },
+    {
+      "label": "density_1e16",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "sheet_R100nm_density_1e16"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e16,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "surface_series": "receptor_density",
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7,
+        "receptor_density_m2": 1e16
+      }
+    },
+    {
+      "label": "density_1e17",
+      "geometry_type": "cylindrically_curved_sheet",
+      "geometry": {
+        "radius_m": 100e-9,
+        "axis": "y",
+        "vertex_z_m": 36.88929738466067e-9,
+        "name": "sheet_R100nm_density_1e17"
+      },
+      "params_overrides": {
+        "receptor_density_m2": 1e17,
+        "receptor_count_override": null
+      },
+      "metadata": {
+        "surface_series": "receptor_density",
+        "radius_m": 100e-9,
+        "curvature_m_inv": 1e7,
+        "receptor_density_m2": 1e17
+      }
+    }
+  ],
+
+  "kinetic_sweeps": [
+    {
+      "label": "kon",
+      "parameter": "k_on_M_inv_s",
+      "log10_start": 4,
+      "log10_stop": 8,
+      "count": 20,
+      "fixed_params_overrides": {
+        "k_off_s": 1e-2
+      },
+      "max_time_factor_over_k_off": 100.0
+    },
+    {
+      "label": "koff",
+      "parameter": "k_off_s",
+      "log10_start": -4,
+      "log10_stop": 0,
+      "count": 20,
+      "fixed_params_overrides": {
+        "k_on_M_inv_s": 1e7
+      },
+      "max_time_factor_over_k_off": 100.0
+    }
+  ]
+}

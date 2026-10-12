@@ -343,17 +343,123 @@ def replicate_survival_curves(
 
 
 def save_figure(
-    fig, output_directory: str | Path, stem: str, dpi: int | None = None
+    fig,
+    output_directory: str | Path,
+    stem: str,
+    dpi: int | None = None,
+    *,
+    exact_size: bool = False,
+    transparent: bool = True,
 ) -> None:
-    """Save PDF and PNG panels, honoring active rcParams by default."""
+    """Save SVG, PDF, and PNG panels, honoring active rcParams by default.
+
+    With ``exact_size=True``, do not apply a tight bounding-box crop. The
+    exported SVG, PDF, and PNG then retain the physical dimensions specified by
+    ``fig.get_size_inches()``, which makes manuscript-panel tiling predictable.
+    Transparent figure and axes backgrounds are used by default for assembly
+    in vector-graphics editors; pass ``transparent=False`` for an opaque export.
+    """
 
     output = Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output / f"{stem}.pdf", bbox_inches="tight")
-    png_options = {"bbox_inches": "tight"}
+    bbox_inches = None if exact_size else "tight"
+    common_options = {
+        "bbox_inches": bbox_inches,
+        "transparent": bool(transparent),
+    }
     if dpi is not None:
-        png_options["dpi"] = dpi
-    fig.savefig(output / f"{stem}.png", **png_options)
+        # SVG and PDF may contain rasterized artists (for example, dense surface
+        # maps). Applying the requested DPI to every format controls the embedded
+        # image resolution while leaving vector text and axes fully editable.
+        common_options["dpi"] = dpi
+    fig.savefig(output / f"{stem}.svg", **common_options)
+    fig.savefig(output / f"{stem}.pdf", **common_options)
+    fig.savefig(output / f"{stem}.png", **common_options)
+
+
+def size_figure_for_axes(
+    fig,
+    axes,
+    width_in: float,
+    height_in: float,
+    *,
+    padding_in: float = 0.08,
+) -> None:
+    """Fix the plot-area size and grow the canvas around its decorations.
+
+    Unlike ``figsize``, this targets the axes rectangle itself. Labels, titles,
+    legends, and colorbars are measured after a draw, and the outer canvas is
+    enlarged as needed without reducing the requested plot width or height.
+    ``axes`` may be one axes or a sequence; the first is the sizing reference,
+    while every axes (including colorbar axes) is translated together.
+    """
+
+    import numpy as np
+
+    if width_in <= 0 or height_in <= 0 or padding_in < 0:
+        raise ValueError("Axes dimensions must be positive and padding nonnegative.")
+    if hasattr(axes, "get_window_extent"):
+        reference = axes
+    else:
+        values = np.asarray(axes, dtype=object).ravel().tolist()
+        if not values:
+            raise ValueError("At least one axes is required.")
+        reference = values[0]
+
+    # Let constrained layout establish a sensible initial arrangement, then
+    # freeze positions so subsequent canvas growth cannot shrink the axes.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    dpi = fig.dpi
+    reference_box = reference.get_window_extent(renderer)
+    current_width = reference_box.width / dpi
+    current_height = reference_box.height / dpi
+    if current_width <= 0 or current_height <= 0:
+        raise RuntimeError("Cannot size an axes with an empty display extent.")
+    old_width, old_height = fig.get_size_inches()
+    fig.set_layout_engine(None)
+    fig.set_size_inches(
+        old_width * width_in / current_width,
+        old_height * height_in / current_height,
+        forward=True,
+    )
+
+    # Measure all decorations in physical inches after the axes-area scaling.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    canvas_width, canvas_height = fig.get_size_inches()
+    tight = fig.get_tightbbox(renderer)
+    left = max(0.0, padding_in - tight.x0)
+    bottom = max(0.0, padding_in - tight.y0)
+    right = max(0.0, tight.x1 + padding_in - canvas_width)
+    top = max(0.0, tight.y1 + padding_in - canvas_height)
+    if not any((left, bottom, right, top)):
+        return
+
+    axes_positions = []
+    for current_axes in fig.axes:
+        position = current_axes.get_position()
+        axes_positions.append(
+            (
+                current_axes,
+                position.x0 * canvas_width,
+                position.y0 * canvas_height,
+                position.width * canvas_width,
+                position.height * canvas_height,
+            )
+        )
+    new_width = canvas_width + left + right
+    new_height = canvas_height + bottom + top
+    fig.set_size_inches(new_width, new_height, forward=True)
+    for current_axes, x0, y0, axes_width, axes_height in axes_positions:
+        current_axes.set_position(
+            [
+                (x0 + left) / new_width,
+                (y0 + bottom) / new_height,
+                axes_width / new_width,
+                axes_height / new_height,
+            ]
+        )
 
 
 __all__ = [
@@ -366,6 +472,7 @@ __all__ = [
     "occupancy_from_bound_time",
     "replicate_survival_curves",
     "save_figure",
+    "size_figure_for_axes",
     "summarize_replicates",
     "survival_on_grid",
 ]

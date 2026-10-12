@@ -56,6 +56,7 @@ cells = [
         """
         from pathlib import Path
         import sys
+        import importlib
         import warnings
         import numpy as np
         import pandas as pd
@@ -68,15 +69,33 @@ cells = [
         if str(PROJECT_ROOT) not in sys.path:
             sys.path.insert(0, str(PROJECT_ROOT))
 
+        import analysis_tools.manuscript_escape_analysis as manuscript_escape_analysis
+        importlib.reload(manuscript_escape_analysis)
         from analysis_tools.manuscript_escape_analysis import (
-            discover_runs, save_figure, summarize_replicates,
+            discover_runs, save_figure, size_figure_for_axes, summarize_replicates,
         )
 
         SAVE_FIGURES = False
         REFRESH_CACHE = False
+        SHOW_PANEL_TITLES = False
         FIGURE_ROOT = PROJECT_ROOT / "analysis_tools" / "manuscript_panels"
         CACHE_ROOT = PROJECT_ROOT / "analysis_tools" / ".analysis_cache"
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        TWO_PANEL_PLOT_AREA_IN = (2.55, 2.15)
+        THREE_PANEL_PLOT_AREA_IN = (1.75, 1.65)
+        PLOT_AREA_SIZE_IN = TWO_PANEL_PLOT_AREA_IN
+        MAP_PLOT_AREA_SIZE_IN = THREE_PANEL_PLOT_AREA_IN
+        SINGLE_PANEL_SIZE_IN = (3.4, 2.8)
+        MAP_PANEL_SIZE_IN = (2.6, 2.35)
+
+        def finish_panel(fig, ax, plot_area=PLOT_AREA_SIZE_IN):
+            if not SHOW_PANEL_TITLES:
+                for current_ax in fig.axes:
+                    current_ax.set_title("")
+            size_figure_for_axes(fig, ax, *plot_area)
+
+        def save_panel(fig, output_directory, stem, dpi=None):
+            save_figure(fig, output_directory, stem, dpi=dpi, exact_size=True)
         """
     ),
     markdown(
@@ -256,13 +275,10 @@ cells = [
     ),
     markdown(
         r"""
-        ## 4. Final figure: confinement increases low-concentration occupancy through cross-rebinding
+        ## 4. Final figure setup
 
-        Panel A shows the low-concentration response without unstable division by the
-        very small classical occupancy. Panel B compares mechanisms at exactly
-        $C/K_D=10^{-3}$. Panel C separates self- and cross-rebinding, and panel D
-        relates the absolute cross-rebinding occupancy contribution to the number of
-        cross-rebinding events.
+        All panels use the same fixed axes plotting area as Figure 2. The surrounding
+        canvas expands independently to accommodate labels and legends.
         """
     ),
     code(
@@ -270,18 +286,27 @@ cells = [
         geometry_order = ["planar", "R100nm", "R49p5nm"]
         geometry_names = {
             "planar": "Planar",
-            "R100nm": "Curved sheet (R = 100 nm)",
+            "R100nm": "Curved sheet",
             "R49p5nm": "Semicircular sheet",
         }
         colors = dict(zip(
             geometry_order,
             plt.cm.viridis(np.linspace(0.12, 0.88, len(geometry_order))),
         ))
+        """
+    ),
+    markdown(
+        r"""
+        ## 5. Figure A — Confinement amplifies dilute occupancy
 
-        fig, axes = plt.subplots(2, 2, figsize=(13.5, 10.5), constrained_layout=True)
+        Full-rebinding response curves are compared with classical binding kinetics.
+        The vertical reference marks the matched concentration used in panels B–D.
+        """
+    ),
+    code(
+        """
+        fig, ax = plt.subplots(figsize=SINGLE_PANEL_SIZE_IN, constrained_layout=True)
 
-        # A: occupancy response in the dilute regime.
-        ax = axes[0, 0]
         for geometry in geometry_order:
             frame = response.loc[
                 response.geometry.eq(geometry)
@@ -299,12 +324,27 @@ cells = [
                 linestyle="--", label="Classical")
         ax.axvline(TARGET_C_OVER_KD, color="0.35", linestyle=":", linewidth=2)
         ax.set(xscale="log", yscale="log", xlabel=r"Normalized concentration $C/K_D$",
-               ylabel=r"Predicted occupancy $\theta$",
+               ylabel=r"Predicted occupancy $\\theta$",
                title="A  Confinement amplifies dilute occupancy")
         ax.legend(frameon=False)
+        finish_panel(fig, ax)
+        if SAVE_FIGURES:
+            save_panel(fig, FIGURE_ROOT, "final_A_dilute_occupancy")
+        plt.show()
+        """
+    ),
+    markdown(
+        r"""
+        ## 6. Figure B — Cross-rebinding supplies the additional occupancy gain
 
-        # B: classical -> no rebinding -> self only -> full at matched C/KD.
-        ax = axes[0, 1]
+        Classical, no-rebinding, self-only, and full-rebinding conditions are compared
+        at $C/K_D=10^{-3}$.
+        """
+    ),
+    code(
+        """
+        fig, ax = plt.subplots(figsize=SINGLE_PANEL_SIZE_IN, constrained_layout=True)
+
         mode_order = ["Classical", "No rebinding", "Self only", "Full rebinding"]
         x_positions = np.arange(len(mode_order))
         for geometry in geometry_order:
@@ -322,19 +362,35 @@ cells = [
         ax.set(yscale="log", ylabel=rf"Occupancy at $C/K_D={TARGET_C_OVER_KD:.0e}$",
                title="B  Cross-rebinding supplies the additional gain")
         ax.legend(frameon=False)
+        finish_panel(fig, ax)
+        if SAVE_FIGURES:
+            save_panel(fig, FIGURE_ROOT, "final_B_mechanism_occupancy")
+        plt.show()
+        """
+    ),
+    markdown(
+        """
+        ## 7. Figure C — Confinement preferentially increases cross-rebinding
 
-        # C: full-rebinding event composition at matched concentration.
-        ax = axes[1, 0]
+        Self- and cross-rebinding events are separated at the matched concentration.
+        """
+    ),
+    code(
+        """
+        fig, ax = plt.subplots(figsize=SINGLE_PANEL_SIZE_IN, constrained_layout=True)
+
         full_target = target.loc[target.simulation_mode.eq("Full rebinding")].copy()
         event_stats = (full_target.groupby("geometry")
-                       [["mean_self_rebindings", "mean_cross_rebindings"]]
-                       .agg(["mean", "sem"]))
+                       .agg(self_mean=("mean_self_rebindings", "mean"),
+                            self_sem=("mean_self_rebindings", "sem"),
+                            cross_mean=("mean_cross_rebindings", "mean"),
+                            cross_sem=("mean_cross_rebindings", "sem")))
         x = np.arange(len(geometry_order))
         width = 0.36
-        self_mean = event_stats.loc[geometry_order, ("mean_self_rebindings", "mean")].to_numpy()
-        self_sem = event_stats.loc[geometry_order, ("mean_self_rebindings", "sem")].to_numpy()
-        cross_mean = event_stats.loc[geometry_order, ("mean_cross_rebindings", "mean")].to_numpy()
-        cross_sem = event_stats.loc[geometry_order, ("mean_cross_rebindings", "sem")].to_numpy()
+        self_mean = event_stats.loc[geometry_order, "self_mean"].to_numpy()
+        self_sem = event_stats.loc[geometry_order, "self_sem"].to_numpy()
+        cross_mean = event_stats.loc[geometry_order, "cross_mean"].to_numpy()
+        cross_sem = event_stats.loc[geometry_order, "cross_sem"].to_numpy()
         ax.bar(x - width/2, self_mean, width, yerr=self_sem, capsize=4,
                color="0.70", edgecolor="0.2", label="Self-rebinding")
         ax.bar(x + width/2, cross_mean, width, yerr=cross_sem, capsize=4,
@@ -345,9 +401,25 @@ cells = [
         ax.set(ylabel="Mean rebindings per trajectory",
                title="C  Confinement preferentially increases cross-rebinding")
         ax.legend(frameon=False)
+        finish_panel(fig, ax)
+        if SAVE_FIGURES:
+            save_panel(fig, FIGURE_ROOT, "final_C_self_cross_rebinding")
+        plt.show()
+        """
+    ),
+    markdown(
+        r"""
+        ## 8. Figure 5D — Cross-rebinding predicts fold occupancy enhancement
 
-        # D: paired cross contribution to occupancy versus cross events.
-        ax = axes[1, 1]
+        At the fixed low concentration $C/K_D=10^{-3}$, full-rebinding occupancy is
+        normalized by the classical occupancy at the same concentration. The absolute
+        full-minus-self contribution is retained in the exported table.
+        """
+    ),
+    code(
+        """
+        fig, ax = plt.subplots(figsize=SINGLE_PANEL_SIZE_IN, constrained_layout=True)
+
         full_values = target.loc[
             target.simulation_mode.eq("Full rebinding"),
             ["geometry", "replicate", "theta", "mean_cross_rebindings"],
@@ -362,36 +434,35 @@ cells = [
             self_values, on=["geometry", "replicate"], validate="one_to_one"
         )
         paired["cross_occupancy_gain"] = paired.theta_full - paired.theta_self
+        paired["occupancy_enhancement_fold"] = paired.theta_full / classical_theta
         for geometry in geometry_order:
             frame = paired.loc[paired.geometry.eq(geometry)]
-            ax.scatter(frame.cross_full, frame.cross_occupancy_gain,
+            ax.scatter(frame.cross_full, frame.occupancy_enhancement_fold,
                        color=colors[geometry], alpha=0.75,
                        label=geometry_names[geometry])
-        usable = paired[["cross_full", "cross_occupancy_gain"]].dropna()
+        usable = paired[["cross_full", "occupancy_enhancement_fold"]].dropna()
         if len(usable) >= 3 and usable.cross_full.nunique() > 1:
-            slope, intercept = np.polyfit(usable.cross_full, usable.cross_occupancy_gain, 1)
+            slope, intercept = np.polyfit(
+                usable.cross_full, usable.occupancy_enhancement_fold, 1
+            )
             xx = np.linspace(usable.cross_full.min(), usable.cross_full.max(), 100)
             correlation = usable.corr().iloc[0, 1]
             ax.plot(xx, intercept + slope*xx, color="black", linestyle="--")
             ax.text(0.04, 0.96, rf"$r={correlation:.2f}$", transform=ax.transAxes,
                     va="top", ha="left")
-        ax.axhline(0, color="0.4", linewidth=1.5)
+        ax.axhline(1, color="0.4", linestyle=":", linewidth=1.5,
+                   label="Classical occupancy")
         ax.set(xlabel="Mean cross-rebindings per trajectory",
-               ylabel=r"Cross-rebinding occupancy gain $\theta_{full}-\theta_{self}$",
-               title="D  Cross-rebinding predicts absolute occupancy gain")
+               ylabel=r"Occupancy enhancement $\\theta_{full}/\\theta_{classical}$",
+               title=rf"D  Occupancy enhancement at $C/K_D={TARGET_C_OVER_KD:.0e}$")
         ax.legend(frameon=False)
-
-        for ax in axes.flat:
-            ax.text(-0.14, 1.08, ax.get_title().split()[0], transform=ax.transAxes,
-                    fontsize=16, fontweight="bold", va="top")
-            ax.set_title(" ".join(ax.get_title().split()[1:]))
-
+        finish_panel(fig, ax)
         if SAVE_FIGURES:
-            save_figure(fig, FIGURE_ROOT, "final_low_concentration_cross_rebinding")
+            save_panel(fig, FIGURE_ROOT, "figure5_D_occupancy_enhancement")
         plt.show()
         """
     ),
-    markdown("## 5. Numerical values and exportable figure tables"),
+    markdown("## 9. Numerical values and exportable figure tables"),
     code(
         """
         target_summary = (target.groupby(["simulation_mode", "geometry"])
@@ -406,6 +477,8 @@ cells = [
         gain_table = (paired.groupby("geometry")
                       .agg(theta_full=("theta_full", "mean"),
                            theta_self=("theta_self", "mean"),
+                           occupancy_enhancement_fold=("occupancy_enhancement_fold", "mean"),
+                           occupancy_enhancement_fold_sem=("occupancy_enhancement_fold", "sem"),
                            cross_occupancy_gain=("cross_occupancy_gain", "mean"),
                            cross_occupancy_gain_sem=("cross_occupancy_gain", "sem"),
                            cross_rebindings=("cross_full", "mean"),

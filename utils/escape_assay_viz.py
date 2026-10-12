@@ -344,9 +344,12 @@ def plot_surface_metric_3d(
     coordinate_unit: str = "nm",
     show_receptors: bool = True,
     receptor_size: float = 5.0,
+    show_colorbar: bool = True,
+    rasterize_surface: bool = False,
     colorbar_pad: float = 0.08,
     elev: float = 28.0,
     azim: float = -55.0,
+    view_zoom: float = 1.0,
     figsize: tuple[float, float] = (9.0, 7.0),
     ax=None,
 ):
@@ -391,6 +394,7 @@ def plot_surface_metric_3d(
         edgecolors="none",
         linewidths=0,
         antialiased=False,
+        rasterized=bool(rasterize_surface),
     )
     ax.add_collection3d(collection)
 
@@ -401,7 +405,10 @@ def plot_surface_metric_3d(
     ax.set_xlim(xyz_min[0] - padding[0], xyz_max[0] + padding[0])
     ax.set_ylim(xyz_min[1] - padding[1], xyz_max[1] + padding[1])
     ax.set_zlim(xyz_min[2] - padding[2], xyz_max[2] + padding[2])
-    ax.set_box_aspect(np.maximum(xyz_max - xyz_min, a_m * coordinate_scale))
+    ax.set_box_aspect(
+        np.maximum(xyz_max - xyz_min, a_m * coordinate_scale),
+        zoom=float(view_zoom),
+    )
 
     if show_receptors:
         receptor_xyz = receptor_summary[
@@ -420,12 +427,13 @@ def plot_surface_metric_3d(
         title=metric.replace("_", " "),
     )
     ax.view_init(elev=elev, azim=azim)
-    scalar_mappable = plt.cm.ScalarMappable(norm=norm, cmap=colormap)
-    scalar_mappable.set_array(values)
-    colorbar = fig.colorbar(
-        scalar_mappable, ax=ax, shrink=0.68, pad=float(colorbar_pad)
-    )
-    colorbar.set_label(colorbar_label or metric.replace("_", " "))
+    if show_colorbar:
+        scalar_mappable = plt.cm.ScalarMappable(norm=norm, cmap=colormap)
+        scalar_mappable.set_array(values)
+        colorbar = fig.colorbar(
+            scalar_mappable, ax=ax, shrink=0.68, pad=float(colorbar_pad)
+        )
+        colorbar.set_label(colorbar_label or metric.replace("_", " "))
     return fig, ax, interpolated
 
 
@@ -445,6 +453,7 @@ def plot_surface_metric_xy(
     show_receptors: bool = True,
     receptor_size: float = 5.0,
     upward_faces_only: bool = True,
+    rasterize_surface: bool = False,
     figsize: tuple[float, float] = (7.0, 6.0),
     ax=None,
 ):
@@ -508,6 +517,7 @@ def plot_surface_metric_xy(
         edgecolors="none",
         linewidths=0,
         antialiased=False,
+        rasterized=bool(rasterize_surface),
     )
     ax.add_collection(collection)
     padding = a_m * coordinate_scale
