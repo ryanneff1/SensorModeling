@@ -1,5 +1,6 @@
 data
 results
+.loq_validation_cache/
 analysis_tools
 !analysis_tools/
 analysis_tools/*
@@ -19,8 +20,12 @@ analysis_tools/*
 !analysis_tools/analyze_manuscript_supp_mechanistic_controls.ipynb
 utils/__pycache__/
 utils/fea_capture.py
-info
+info/*
+!info/*.tex
+!info/*.bib
+!info/latexmkrc
 .vscode
 run_biosensor_mc.ipynb
 run_escape_assay.ipynb
+run_escape_assay_loq.ipynb
 run_fea_capture.ipynb

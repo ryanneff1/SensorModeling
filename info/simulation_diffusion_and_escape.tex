@@ -1,0 +1,92 @@
+\section{Brownian diffusion and the escape observable}
+\label{sec:diffusion}
+
+\subsection{From Fick's law to a lattice random walk}
+
+In a homogeneous fluid without advection or external forces, conservation of
+mass together with Fick's first law, $\bm J=-D\bm\nabla c$, gives Fick's second
+law
+\begin{equation}
+ \frac{\partial c}{\partial t}=D\nabla^2c.
+ \label{eq:fick2}
+\end{equation}
+The forward-Euler, centered-space discretization of Eq.~\ref{eq:fick2} at
+lattice site $\bm i$ is
+\begin{equation}
+ c_{\bm i}^{n+1}
+ =c_{\bm i}^{n}
+ +\lambda_D\sum_{\bm e\in\mathcal N_6}
+ \left(c_{\bm i+\bm e}^{n}-c_{\bm i}^{n}\right),
+ \label{eq:ftcs}
+\end{equation}
+where $\mathcal N_6=\{\pm\hat{\bm x},\pm\hat{\bm y},\pm\hat{\bm z}\}$.
+Equation~\ref{eq:ftcs} is also the master equation of the random-walk kernel
+defined by Eqs.~\ref{eq:lambda-D} and \ref{eq:stay-probability}.  Thus, the
+single-particle Monte Carlo propagator and the finite-difference diffusion
+equation have the same ensemble evolution.
+
+For one update, symmetry gives $\E[\Delta\bm r]=\bm 0$ and
+\begin{equation}
+ \E\!\left[\lvert\Delta\bm r\rvert^2\right]
+ =6\lambda_Da^2=6D\dt.
+ \label{eq:one-step-msd}
+\end{equation}
+Independent increments therefore give
+\begin{equation}
+ \E\!\left[\lvert\bm r(t)-\bm r(0)\rvert^2\right]=6Dt,
+ \qquad
+ \E[(x(t)-x(0))^2]=2Dt,
+ \label{eq:einstein-msd}
+\end{equation}
+which is the Einstein relation for three-dimensional Brownian diffusion
+\citep{einstein1905}.  The lattice walk consequently represents overdamped
+Brownian transport on times and lengths resolved by $\dt$ and $a$.
+
+\subsection{Boundary conditions}
+
+The manuscript simulations use periodic lateral boundaries,
+\begin{equation}
+ (x,y,z)\equiv(x+L_x,y,z)\equiv(x,y+L_y,z),
+ \label{eq:periodic-boundaries}
+\end{equation}
+implemented by modular wrapping of the $x$ and $y$ indices.  This suppresses
+artificial loss from the sides and represents a periodically tiled sensor
+patch.  A move proposed into the voxelized solid is rejected, which is the
+random-walk realization of a reflecting, no-flux boundary on nonreactive
+surface encounters.  Receptors on exposed faces add stochastic reaction to
+this otherwise reflecting interface.
+
+For the escape assay, a trajectory terminates when the free ligand reaches an
+absorbing escape surface.  The principal manuscript calculations use a
+horizontal plane $z=z_{\mathrm{esc}}$; crossing an explicitly open domain
+boundary also counts as escape.  If
+\begin{equation}
+ T_{\mathrm{esc}}=\inf\{t>0:z(t)\ge z_{\mathrm{esc}}\},
+ \label{eq:first-passage}
+\end{equation}
+then the retention survival function is the first-passage quantity
+\begin{equation}
+ S(t)=\Prb(T_{\mathrm{esc}}>t).
+ \label{eq:survival}
+\end{equation}
+It measures persistence in the explicit near-surface region, not the survival
+of a chemical bond.  A trajectory can alternate many times between bound and
+unbound states before the event in Eq.~\ref{eq:first-passage}.
+
+Trajectories that have not escaped by the finite horizon $t_{\max}$ are
+right-censored.  With $d_j$ escape events among $n_j$ trajectories at risk at
+ordered event time $t_j$, the plotted Kaplan--Meier estimator is
+\begin{equation}
+ \widehat S(t)=\prod_{t_j\le t}\left(1-\frac{d_j}{n_j}\right).
+ \label{eq:kaplan-meier}
+\end{equation}
+The assay additionally records the observation time, number of binding
+intervals, self- and cross-rebinding counts, and cumulative bound time
+\begin{equation}
+ T_B=\sum_{q=0}^{N_{\mathrm{reb}}}B_q,
+ \label{eq:cumulative-bound-time}
+\end{equation}
+where $B_0$ is the initial bound interval and subsequent $B_q$ are rebound
+intervals.  Free-excursion durations contribute to $T_{\mathrm{esc}}$ but not
+to $T_B$.  This distinction is essential because receptor occupancy is a
+time-integrated bound-state observable.

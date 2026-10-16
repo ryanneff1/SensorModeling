@@ -1,0 +1,153 @@
+\documentclass[11pt]{article}
+
+% This standalone wrapper is intended for internal review.  The four input
+% files can also be copied directly into an ACS manuscript or Supporting
+% Information document.  Build and retain only the final PDF with:
+%   latexmk -pdf manuscript_simulation_theory.tex
+%   latexmk -c manuscript_simulation_theory.tex
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage[version=4]{mhchem}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+
+\newcommand{\kOn}{k_{\mathrm{on}}}
+\newcommand{\kOff}{k_{\mathrm{off}}}
+\newcommand{\tauB}{\tau_{B,\mathrm{eff}}}
+\newcommand{\NA}{N_{\mathrm A}}
+\newcommand{\dt}{\Delta t}
+\newcommand{\dx}{a}
+\newcommand{\Prb}{\mathop{\mathrm{Pr}}}
+\newcommand{\E}{\mathop{\mathrm{E}}}
+
+\title{Mathematical Description of the Single-Ligand\\
+Escape and Rebinding Simulations}
+\author{Methods text supporting manuscript Figures 2--5}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document defines the physical and mathematical model used for the
+single-ligand escape and rebinding simulations in manuscript Figures 2--5.
+The model is an on-lattice, particle-based reaction--diffusion Monte Carlo
+scheme.  Diffusion is derived from Fick's equation and the Einstein relation,
+whereas receptor association and dissociation are represented by Poisson
+reaction hazards.  Single-ligand trajectories measure the cumulative time
+spent bound before escape from an explicit near-surface region.  A
+renewal--reward balance then converts that effective bound time into an
+occupancy-aware concentration response and an operational $C_{50}$.  This
+kinetic $C_{50}$ is deliberately distinguished from the thermodynamic
+dissociation constant $K_D$.
+\end{abstract}
+
+\section{Scope and model classification}
+
+The simulation resolves one tagged ligand moving on a cubic lattice above a
+voxelized sensor surface.  It is most precisely described as an
+\emph{on-lattice reaction--diffusion Monte Carlo} or single-particle,
+reaction--diffusion-master-equation-like model.  It is Brownian in the
+overdamped, long-time sense because its propagator has the Fickian mean-square
+displacement, but it is not an inertial molecular-dynamics or underdamped
+Langevin simulation.  This class of spatial stochastic model is closely
+related to lattice reaction--diffusion methods and particle-based stochastic
+reaction--diffusion algorithms used for biochemical systems
+\citep{gillespie1976,andrews2004,isaacson2008,hellander2012}.
+
+The model separates two questions.  First, a tagged analyte that begins bound
+to a receptor is followed through dissociation, free diffusion, and any
+subsequent self- or cross-rebinding events until it escapes or reaches the
+observation horizon.  Second, the resulting cumulative bound time is inserted
+into a mean-field kinetic balance to predict the concentration-dependent
+fractional occupancy.  No claim is made that nanostructuring changes the
+microscopic equilibrium free energy or the intrinsic $K_D=\kOff/\kOn$.
+
+\begin{table}[ht]
+\centering
+\caption{Principal symbols.  Concentration is expressed in molar units
+throughout the kinetic equations.}
+\label{tab:notation}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+$a$ & cubic lattice spacing & m \\
+$\dt$ & diffusion/reaction update interval & s \\
+$D$ & ligand diffusion coefficient & \si{\meter\squared\per\second} \\
+$V_{\mathrm{rxn}}$ & local reaction volume & L \\
+$\rho_R$ & receptor surface density & \si{\per\meter\squared} \\
+$\kOn$ & intrinsic bimolecular association constant & \si{\liter\per\mole\per\second} \\
+$\kOff$ & unimolecular dissociation constant & \si{\per\second} \\
+$\tauB(\phi)$ & mean cumulative bound time before escape & s \\
+$\phi$ & imposed background receptor occupancy & dimensionless \\
+$\theta$ & predicted ensemble fractional occupancy & dimensionless \\
+$C$ & bulk analyte concentration & M \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Shared manuscript simulation settings unless explicitly swept.  The
+geometry, receptor density, $\kOn$, $\kOff$, and background occupancy vary in
+the corresponding factorial and kinetic studies.}
+\label{tab:baseline-settings}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Setting & Baseline value & Implementation \\
+\midrule
+Nominal domain & $100\times100\times100$ nm$^3$ & explicit near-surface region \\
+Lattice spacing & $a=\SI{1}{\nano\meter}$ & cubic lattice \\
+Diffusion coefficient & $D=\SI{1e-11}{\meter\squared\per\second}$ & isotropic \\
+Reaction region & $n_{\mathrm{rxn}}=1$ voxel & $V_{\mathrm{rxn}}=a^3$ \\
+Association constant & $\kOn=10^7$ M$^{-1}$ s$^{-1}$ & baseline chemistry \\
+Dissociation constant & $\kOff=10^{-2}$ s$^{-1}$ & baseline chemistry \\
+Lateral boundaries & periodic in $x$ and $y$ & tiled sensor patch \\
+Escape boundary & $z_{\mathrm{esc}}=\SI{75}{\nano\meter}$ & absorbing plane \\
+Initial state & receptor-bound & one tagged ligand \\
+Trajectories & 100 per release receptor & per independent replicate \\
+Baseline horizon & $t_{\max}=10^4$ s & right censoring at horizon \\
+Kinetic-sweep horizon & $t_{\max}=100/\kOff$ & constant intrinsic-lifetime multiple \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\input{simulation_grid_and_timestep}
+\input{simulation_diffusion_and_escape}
+\input{simulation_binding_and_rebinding}
+\input{simulation_occupancy_and_concentration}
+
+\section{Connection to manuscript Figures 2--5}
+
+The mathematical objects above enter the figures as follows.  Figure~2 uses
+the first-passage survival function, the distribution of cumulative bound
+time, and the number of rebindings to establish how curvature and receptor
+density alter retention.  Figure~3 uses occupancy-aware values of
+$\tauB(\phi)$ to quantify how geometry, receptor density, and intrinsic
+kinetics shift the operational $C_{50}$.  Figure~4 evaluates the same
+trajectory observables receptor by receptor on a sinusoidal surface, enabling
+local curvature--retention and local $C_{50}$ maps.  Figure~5 uses the full
+parametric response $\{C(\phi),\phi\}$ and the self/cross-rebinding
+classification to compare dilute and nearly saturated regimes.
+
+\section{Interpretive boundary}
+
+The simulation establishes a kinetic mechanism: geometry changes the
+probability of return to a receptor-bearing surface after dissociation, which
+changes the cumulative bound time and therefore the concentration required to
+maintain a specified occupancy.  The resulting $C_{50}$ is an operational
+concentration scale for this open, diffusion-influenced kinetic model.  It
+should not be described as a geometry-dependent thermodynamic $K_D$ unless an
+independent equilibrium free-energy calculation demonstrates such a change.
+
+\bibliographystyle{unsrtnat}
+\bibliography{simulation_theory_references}
+
+\end{document}

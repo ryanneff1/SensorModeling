@@ -1,0 +1,142 @@
+\section{Association, dissociation, and rebinding}
+\label{sec:binding}
+
+In stochastic kinetics, a \emph{hazard} is the instantaneous conditional rate
+of an event, given that the event has not already occurred.  If $T$ is the
+waiting time to an event, its hazard is
+\begin{equation}
+ h(t)=\lim_{\delta t\rightarrow0}
+ \frac{\Prb\!\left(t\leq T<t+\delta t\mid T\geq t\right)}{\delta t}.
+ \label{eq:hazard-definition}
+\end{equation}
+It has units of inverse time.  For a constant hazard $h$, the probability of
+no event during an interval of length $t$ is $e^{-ht}$, and the probability of
+at least one event is $1-e^{-ht}$.  Thus, ``hazard'' here simply means the
+instantaneous stochastic event rate; it does not imply a separate physical
+mechanism.  This rate-to-probability conversion is the same one used in
+chemical master-equation and kinetic Monte Carlo methods
+\citep{gillespie1976}.
+
+\subsection{Microscopic association probability}
+
+The chemical step is
+\begin{equation}
+ \ce{L + R <=>[k_{on}][k_{off}] LR},
+ \label{eq:reaction}
+\end{equation}
+where $\kOn$ is supplied in \si{\liter\per\mole\per\second} (equivalently,
+$\mathrm{M}^{-1}\,\mathrm{s}^{-1}$) and $\kOff$ in
+\si{\per\second}.  A ligand can react when it occupies the fluid voxel adjacent
+to a receptor-bearing surface face.  If the configured reaction region
+contains $n_{\mathrm{rxn}}$ voxels, its volume in liters is
+\begin{equation}
+ V_{\mathrm{rxn}}
+ =n_{\mathrm{rxn}}a^3\left(10^3\ \mathrm{L\,m^{-3}}\right).
+ \label{eq:reaction-volume}
+\end{equation}
+One ligand in this volume corresponds to molar concentration
+\begin{equation}
+ C_1=\frac{1}{\NA V_{\mathrm{rxn}}},
+ \label{eq:one-particle-concentration}
+\end{equation}
+where $\NA$ is Avogadro's constant.  For $m$ available receptors at the same
+reaction site, elementary mass action gives the total instantaneous
+association rate (hazard)
+\begin{equation}
+ h_{\mathrm{on}}(m)=m\kOn C_1
+ =\frac{m\kOn}{\NA V_{\mathrm{rxn}}}.
+ \label{eq:on-hazard}
+\end{equation}
+Treating reaction events as a Poisson process during one update yields
+\begin{equation}
+ p_{\mathrm{bind}}(m)
+ =1-\exp[-h_{\mathrm{on}}(m)\dt]
+ =1-\exp\!\left[-\frac{m\kOn\dt}{\NA V_{\mathrm{rxn}}}\right].
+ \label{eq:binding-probability}
+\end{equation}
+Conditional on association, one of the $m$ available receptors is selected
+uniformly.  The exponential form preserves $0\le p_{\mathrm{bind}}\le1$ and
+reduces to the familiar chemical-master-equation propensity
+$p_{\mathrm{bind}}\simeq m\kOn\dt/(\NA V_{\mathrm{rxn}})$ when the exponent is
+small \citep{gillespie1976,fange2006}.
+
+Equation~\ref{eq:binding-probability} defines how the reported intrinsic
+$\kOn$ is interpreted at the chosen lattice scale.  In a diffusion-influenced
+reaction, the macroscopic association rate also depends on transport and on
+the chosen reactive length scale; this distinction is familiar from
+Smoluchowski and radiation-boundary descriptions
+\citep{collins1949,agmon1990,andrews2009}.  Moreover, a strictly local
+reaction--diffusion master equation does not possess a mesh-independent
+microscopic limit for every bimolecular system
+\citep{isaacson2008,hellander2012}.  Accordingly, $a$ and
+$n_{\mathrm{rxn}}$ are declared model parameters, and lattice-spacing
+robustness is tested explicitly rather than absorbed into an unreported rate
+renormalization.
+
+\subsection{Dissociation probability and event-wise acceleration}
+
+For a bound complex with first-order dissociation constant $\kOff$, the
+continuous waiting-time density is
+\begin{equation}
+ f_B(t)=\kOff e^{-\kOff t},
+ \qquad \E[B]=\frac{1}{\kOff}.
+ \label{eq:exponential-dwell}
+\end{equation}
+The dissociation hazard is the constant first-order rate $h_{\mathrm{off}}=
+\kOff$.  Integrating this rate over one update gives the exact conditional
+dissociation probability
+\begin{equation}
+ p_{\mathrm{off}}=1-e^{-\kOff\dt}.
+ \label{eq:off-probability}
+\end{equation}
+Rather than evaluating Eq.~\ref{eq:off-probability} repeatedly during long
+bound intervals, the escape assay draws the number of bound updates directly,
+\begin{equation}
+ G\sim\operatorname{Geometric}(p_{\mathrm{off}}),\qquad B_{\Delta}=G\dt,
+ \label{eq:geometric-dwell}
+\end{equation}
+with support $G=1,2,\ldots$.  This event-wise skip is statistically identical
+to testing dissociation after every lattice update.  Its discrete mean is
+\begin{equation}
+ \E[B_{\Delta}]
+ =\frac{\dt}{1-e^{-\kOff\dt}}
+ =\frac{1}{\kOff}+\frac{\dt}{2}+O(\kOff\dt^2),
+ \label{eq:discrete-dwell-mean}
+\end{equation}
+so the physical exponential mean is recovered as $\kOff\dt\rightarrow0$.
+This acceleration changes computational cost but not the discrete stochastic
+model.
+
+Each receptor-conditioned escape trajectory begins in the bound state.  Its
+first interval is therefore drawn from Eq.~\ref{eq:geometric-dwell} and
+contributes to $T_B$, but it is not counted as a rebinding event.  Upon
+dissociation, the ligand is placed in the fluid voxel adjacent to the released
+receptor.  It subsequently diffuses according to Section~\ref{sec:diffusion}
+and can bind again according to Eq.~\ref{eq:binding-probability}.
+
+\subsection{Self-rebinding, cross-rebinding, and finite occupancy}
+
+A new binding event is classified relative to the receptor vacated at the
+start of the current free excursion.  Return to that receptor is
+\emph{self-rebinding}; binding to a different receptor is
+\emph{cross-rebinding}.  The all-rebinding model permits both.  A mechanistic
+self-only control disables cross-rebinding while leaving diffusion,
+$\kOn$, and $\kOff$ unchanged.
+
+Finite ensemble occupancy is represented without adding other explicitly
+diffusing ligands.  For a prescribed background occupancy $\phi$, every
+non-source receptor is independently available with probability $1-\phi$
+during a tagged ligand's free excursion.  That availability field remains
+fixed throughout the excursion and is resampled after the next dissociation;
+it therefore does not flicker on the diffusion-update timescale.  The receptor
+just vacated by the tagged ligand is forced available, because its ligand is
+the tagged molecule itself.  This construction preserves self-return while
+progressively suppressing cross-rebinding as the background approaches
+saturation.
+
+The background field is a controlled mean-field approximation, not an
+explicit many-ligand equilibrium simulation.  It assumes statistically
+independent receptor occupancy outside the tagged trajectory and neglects
+ligand--ligand interactions and correlated turnover of background ligands.
+Its advantage is that it isolates how receptor availability modifies the
+single-ligand retention kernel at a known occupancy.

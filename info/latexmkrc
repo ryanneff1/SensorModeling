@@ -1,0 +1,5 @@
+# Keep the PDF after `latexmk -c`, but also remove the BibTeX bibliography
+# generated from simulation_theory_references.bib.  Latexmk normally retains
+# .bbl files because some projects treat them as source artifacts.
+$bibtex_use = 1.5;
+$clean_ext .= ' bbl';

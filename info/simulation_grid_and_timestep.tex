@@ -1,0 +1,107 @@
+\section{Spatial discretization and physical time}
+\label{sec:grid}
+
+\subsection{Cubic lattice and voxelized sensor surface}
+
+The explicit domain has nominal dimensions $L_x\times L_y\times H$ and is
+partitioned into a simple cubic lattice with spacing $a$.  The implemented
+numbers of lattice intervals are
+\begin{equation}
+ N_x=\operatorname{round}\!\left(\frac{L_x}{a}\right),\qquad
+ N_y=\operatorname{round}\!\left(\frac{L_y}{a}\right),\qquad
+ N_z=\operatorname{round}\!\left(\frac{H}{a}\right).
+ \label{eq:grid-counts}
+\end{equation}
+Fluid and solid sites are stored on the resulting Cartesian grid.  An
+analytical surface---planar, cylindrically curved, or sinusoidal---is converted
+to a solid mask.  Every face separating an accessible fluid voxel from a
+solid voxel is an exposed surface face with area $a^2$.  Consequently, the
+voxelized reactive area is
+\begin{equation}
+ A_s=\sum_{f\in\mathcal F_{\mathrm{reactive}}}a^2,
+ \label{eq:voxel-area}
+\end{equation}
+where $\mathcal F_{\mathrm{reactive}}$ contains the bulk-accessible exposed
+faces.  At prescribed receptor density $\rho_R$, the receptor count is
+\begin{equation}
+ N_R=\operatorname{round}(\rho_R A_s),
+ \label{eq:receptor-count}
+\end{equation}
+unless a fixed receptor count is explicitly imposed.  Receptor-bearing faces
+are sampled uniformly without replacement for the manuscript simulations;
+there is therefore at most one receptor per surface face.  Fixed-$N_R$
+controls separate geometric confinement from changes in total receptor
+number.
+
+The staircase representation in Eq.~\ref{eq:voxel-area} is part of the
+numerical model.  Refining $a$ improves geometric resolution but also changes
+the local reaction volume and, in a local lattice reaction model, can change
+the relationship between microscopic and mesoscopic reaction rates.  Spatial
+resolution must therefore be assessed by convergence studies rather than by
+assuming that arbitrarily small voxels are automatically more physical
+\citep{isaacson2008,hellander2012,hellander2015}.
+
+\subsection{Diffusive update interval}
+
+The coefficient $\lambda_D$ is not an additional physical parameter; it is
+the dimensionless group produced by discretizing Fick's second law.  Let
+$c_{i,j,k}^{n}$ denote the concentration at lattice site $(i,j,k)$ and time
+$t_n=n\dt$.  A forward difference in time and centered second differences in
+space give
+\begin{align}
+ \frac{c_{i,j,k}^{n+1}-c_{i,j,k}^{n}}{\dt}
+ =\frac{D}{a^2}\big(&c_{i+1,j,k}^{n}+c_{i-1,j,k}^{n}
+ +c_{i,j+1,k}^{n}+c_{i,j-1,k}^{n}\nonumber\\
+ &+c_{i,j,k+1}^{n}+c_{i,j,k-1}^{n}
+ -6c_{i,j,k}^{n}\big).
+ \label{eq:ftcs-grid-derivation}
+\end{align}
+Multiplying Eq.~\ref{eq:ftcs-grid-derivation} by $\dt$ shows that the fraction
+transferred from a site to \emph{each} nearest neighbor during one update is
+$D\dt/a^2$.  This is the standard forward-time, centered-space (FTCS)
+discretization of the diffusion equation \citep{crank1975}.  We therefore
+define
+\begin{equation}
+ \lambda_D=\frac{D\dt}{a^2}.
+ \label{eq:lambda-D}
+\end{equation}
+It can also be read as the ratio between the update duration $\dt$ and the
+diffusive timescale $a^2/D$ associated with one lattice spacing.  In the
+single-particle representation, the ligand moves to any of its six nearest
+neighbors with probability $\lambda_D$ per direction and remains at its
+present site with probability
+\begin{equation}
+ p_0=1-6\lambda_D.
+ \label{eq:stay-probability}
+\end{equation}
+Nonnegative probabilities require the standard three-dimensional explicit
+diffusion stability condition
+\begin{equation}
+ \dt\leq \frac{a^2}{6D}.
+ \label{eq:stability}
+\end{equation}
+When the user does not prescribe a timestep, the implementation uses
+\begin{equation}
+ \dt=0.95\frac{a^2}{6D},
+ \label{eq:default-dt}
+\end{equation}
+which gives $p_0=0.05$ and $p_{\pm x}=p_{\pm y}=p_{\pm z}=0.95/6$.  For the
+manuscript baseline $a=\SI{1}{\nano\meter}$ and
+$D=\SI{1e-11}{\meter\squared\per\second}$,
+Eq.~\ref{eq:default-dt} gives $\dt\approx\SI{1.58e-8}{\second}$.  Physical
+observation times are obtained as integer numbers of these updates.
+
+\subsection{Numerical scales that must remain distinct}
+
+Three lengths have different meanings and should not be conflated:
+\begin{enumerate}[leftmargin=*]
+ \item $a$ controls the spatial resolution, surface voxelization, and local
+ reaction volume;
+ \item the geometric length scales (for example, a cylindrical radius or
+ sinusoidal wavelength) define confinement and curvature; and
+ \item the escape height defines the boundary of the explicitly simulated
+ near-surface region and hence the first-passage endpoint.
+\end{enumerate}
+The supplementary numerical controls vary $a$, lateral domain size, and
+escape height because each can otherwise introduce an arbitrary computational
+scale into a rebinding calculation.

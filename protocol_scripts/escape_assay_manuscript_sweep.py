@@ -115,6 +115,68 @@ def _kinetic_parameter_conditions(config: dict) -> list[dict[str, Any]] | None:
     return conditions
 
 
+def _sinusoidal_amplitude_conditions(config: dict) -> list[dict[str, Any]] | None:
+    """Expand a compact linear sinusoidal-amplitude sweep definition."""
+
+    sweep = config.get("sinusoidal_amplitude_sweep")
+    if sweep is None:
+        return None
+    if not isinstance(sweep, dict):
+        raise ValueError("sinusoidal_amplitude_sweep must be an object.")
+
+    amplitudes_nm = np.linspace(
+        float(sweep["start_nm"]),
+        float(sweep["stop_nm"]),
+        int(sweep["count"]),
+    )
+    if amplitudes_nm.size < 2 or np.any(amplitudes_nm < 0):
+        raise ValueError(
+            "The amplitude sweep requires at least two nonnegative values."
+        )
+    wavelength_x_m = float(sweep["wavelength_x_m"])
+    wavelength_y_m = float(sweep["wavelength_y_m"])
+    phase_x_rad = float(sweep.get("phase_x_rad", 0.0))
+    phase_y_rad = float(sweep.get("phase_y_rad", 0.0))
+    clearance_m = float(sweep["escape_clearance_above_peak_m"])
+    if clearance_m <= 0:
+        raise ValueError("escape_clearance_above_peak_m must be positive.")
+
+    conditions: list[dict[str, Any]] = []
+    for index, amplitude_nm in enumerate(amplitudes_nm):
+        amplitude_m = float(amplitude_nm) * 1e-9
+        # Pin every valley at z=0. The peak is consequently at z=2A.
+        mean_z_m = amplitude_m
+        maximum_z_m = 2.0 * amplitude_m
+        label = f"sinusoidal_A{index:02d}_{amplitude_nm:.1f}nm".replace(".", "p")
+        conditions.append(
+            {
+                "label": label,
+                "geometry_type": "sinusoidal_height_field",
+                "geometry": {
+                    "amplitude_m": amplitude_m,
+                    "wavelength_x_m": wavelength_x_m,
+                    "wavelength_y_m": wavelength_y_m,
+                    "mean_z_m": mean_z_m,
+                    "phase_x_rad": phase_x_rad,
+                    "phase_y_rad": phase_y_rad,
+                    "name": label,
+                },
+                "assay_overrides": {
+                    "escape_z_m": maximum_z_m + clearance_m,
+                },
+                "metadata": {
+                    "amplitude_sweep_index": index,
+                    "amplitude_m": amplitude_m,
+                    "amplitude_nm": float(amplitude_nm),
+                    "mean_z_m": mean_z_m,
+                    "maximum_z_m": maximum_z_m,
+                    "escape_clearance_above_peak_m": clearance_m,
+                },
+            }
+        )
+    return conditions
+
+
 def _background_occupancy_values(config: dict) -> list[float] | None:
     """Return explicit occupancies or construct the standard response grid."""
 
@@ -167,7 +229,17 @@ def _expand_conditions(config: dict) -> list[dict[str, Any]]:
             raise ValueError("conditions must be a nonempty list.")
         conditions = [dict(value) for value in explicit]
     else:
-        geometries = config.get("geometry_conditions", [])
+        generated_geometries = _sinusoidal_amplitude_conditions(config)
+        if generated_geometries is not None and "geometry_conditions" in config:
+            raise ValueError(
+                "Use either sinusoidal_amplitude_sweep or geometry_conditions, "
+                "not both."
+            )
+        geometries = (
+            generated_geometries
+            if generated_geometries is not None
+            else config.get("geometry_conditions", [])
+        )
         generated_parameters = _kinetic_parameter_conditions(config)
         if generated_parameters is not None and "parameter_conditions" in config:
             raise ValueError(

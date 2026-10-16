@@ -760,12 +760,13 @@ def make_sinusoidal_height_field_geometry(
     Passing ``wavelength_y_m=None`` produces a one-dimensional corrugation
     that is invariant along y. Positive amplitude generates alternating
     concave valleys and convex peaks with smooth transitions between them.
+    Zero amplitude is the planar member of the same geometry family.
     """
 
     amplitude_m = float(amplitude_m)
     wavelength_x_m = float(wavelength_x_m)
-    if amplitude_m <= 0:
-        raise ValueError("amplitude_m must be positive.")
+    if amplitude_m < 0:
+        raise ValueError("amplitude_m must be nonnegative.")
     if wavelength_x_m <= 0:
         raise ValueError("wavelength_x_m must be positive.")
     if wavelength_y_m is not None:
