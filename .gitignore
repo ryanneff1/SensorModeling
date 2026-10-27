@@ -1,31 +1,37 @@
-data
-results
+# Operating-system and editor metadata
+.DS_Store
+.vscode/
+
+# Python and Jupyter generated files
+__pycache__/
+*.py[cod]
+*.pyo
+.ipynb_checkpoints/
+
+# Local simulation data and cluster outputs
+data/
+results/
+
+# Reproducible analysis caches and rendered manuscript panels
 .loq_validation_cache/
-analysis_tools
-!analysis_tools/
-analysis_tools/*
-!analysis_tools/manuscript_escape_analysis.py
-!analysis_tools/build_manuscript_escape_notebooks.py
-!analysis_tools/build_final_low_concentration_notebook.py
-!analysis_tools/build_occupancy_c50_notebooks.py
-!analysis_tools/standardize_manuscript_figure_sizes.py
-!analysis_tools/build_occupancy_c50_supplement_notebook.py
-!analysis_tools/analyze_manuscript_supp_occupancy_c50_controls.ipynb
-!analysis_tools/apply_jacs_publication_formatting.py
-!analysis_tools/analyze_manuscript_figure2_rebinding_affinity.ipynb
-!analysis_tools/analyze_manuscript_figure3_curvature_density.ipynb
-!analysis_tools/analyze_manuscript_figure4_local_curvature.ipynb
-!analysis_tools/analyze_manuscript_final_low_concentration.ipynb
-!analysis_tools/analyze_manuscript_supp_numerical_convergence.ipynb
-!analysis_tools/analyze_manuscript_supp_mechanistic_controls.ipynb
-utils/__pycache__/
-utils/fea_capture.py
-info/*
-!info/*.tex
-!info/*.bib
-!info/latexmkrc
-.vscode
-run_biosensor_mc.ipynb
-run_escape_assay.ipynb
-run_escape_assay_loq.ipynb
-run_fea_capture.ipynb
+analysis_tools/.analysis_cache/
+analysis_tools/manuscript_panels/
+
+# LaTeX build products (retain source .tex/.bib and latexmkrc files)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+info/*.pdf
+
+# Local finite-element environments or outputs
+.fenics/

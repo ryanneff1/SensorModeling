@@ -1,0 +1,18 @@
+{
+  "protocol": "manuscript_fig2_2d_no_rebinding_controls",
+  "description": "No-rebinding controls for the four planar/semicircular and low/high receptor-density corner conditions in 2D Figure 2.",
+  "design_type": "corner_controls",
+  "n_replicates": 8,
+  "p_bind_contact": 0.0,
+  "design": {
+    "planar_reference_length_m": 1.0e-7,
+    "corner_radii_nm": [
+      null,
+      50
+    ],
+    "corner_planar_counts": [
+      2,
+      50
+    ]
+  }
+}

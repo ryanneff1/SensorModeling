@@ -1,0 +1,64 @@
+{
+  "protocol": "manuscript_fig2_2d_curvature_density",
+  "description": "Full-rebinding 2D Figure 2 sweep. The union contains a curvature sweep, a receptor-density sweep, and a 5 x 5 factorial design; overlapping conditions are simulated only once.",
+  "design_type": "full_rebinding_union",
+  "n_replicates": 8,
+  "p_bind_contact": 0.2,
+  "design": {
+    "planar_reference_length_m": 1.0e-7,
+    "curvature_radii_nm": [
+      null,
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      120,
+      110,
+      100,
+      90,
+      80,
+      70,
+      60,
+      50
+    ],
+    "curvature_sweep_density_m_inv": 2.0e8,
+    "density_sweep_radius_nm": 100,
+    "planar_receptor_counts": [
+      2,
+      5,
+      8,
+      11,
+      14,
+      17,
+      20,
+      23,
+      26,
+      29,
+      32,
+      35,
+      38,
+      41,
+      44,
+      47,
+      50
+    ],
+    "factorial_radii_nm": [
+      null,
+      200,
+      150,
+      100,
+      50
+    ],
+    "factorial_planar_counts": [
+      2,
+      11,
+      20,
+      35,
+      50
+    ]
+  }
+}

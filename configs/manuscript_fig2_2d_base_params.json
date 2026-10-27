@@ -1,0 +1,15 @@
+{
+  "parameters": {
+    "width_m": 1.0e-7,
+    "height_m": 1.2e-7,
+    "lattice_spacing_m": 1.0e-9,
+    "diffusion_m2_s": 1.0e-11,
+    "k_off_s": 1.0e-2,
+    "receptor_line_density_m_inv": 2.0e8,
+    "p_bind_contact": 0.2,
+    "escape_clearance_m": 3.0e-8,
+    "max_time_factor_over_k_off": 1.0e6,
+    "n_trials_per_receptor": 100,
+    "seed": 20261027
+  }
+}
