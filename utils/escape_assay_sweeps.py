@@ -14,6 +14,39 @@ import numpy as np
 from utils.biosensor_mc import Params
 
 
+def _existing_manifest_matches_task(manifest_path: Path, task: dict) -> bool:
+    """Return whether an exported run was produced from this exact task.
+
+    Earlier restart logic skipped any directory containing a manifest.  That
+    can silently mix results when a censoring horizon or another simulation
+    setting changes.  Comparing the stored run definition makes resubmission
+    restartable while automatically recomputing stale bundles.
+    """
+
+    try:
+        with manifest_path.open(encoding="utf-8") as stream:
+            manifest = json.load(stream)
+        run_metadata = manifest.get("run_metadata", {})
+        comparisons = (
+            (manifest.get("params"), task.get("params")),
+            (run_metadata.get("protocol"), task.get("protocol")),
+            (run_metadata.get("geometry_type"), task.get("geometry_type")),
+            (run_metadata.get("geometry"), task.get("geometry")),
+            (run_metadata.get("assay"), task.get("assay")),
+            (run_metadata.get("receptor_seed"), task.get("receptor_seed")),
+            (run_metadata.get("trajectory_seed"), task.get("trajectory_seed")),
+        )
+        # JSON round-tripping normalizes tuples from dataclass fields to the
+        # lists stored in manifests.
+        return all(
+            json.loads(json.dumps(stored, sort_keys=True))
+            == json.loads(json.dumps(expected, sort_keys=True))
+            for stored, expected in comparisons
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def load_params_json(path: str | Path) -> tuple[Params, dict]:
     path = Path(path).expanduser().resolve()
     with path.open("r", encoding="utf-8") as stream:
@@ -164,7 +197,11 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
         else float(raw_sweep_value)
     )
     try:
-        if manifest_path.exists() and not task["overwrite"]:
+        if (
+            manifest_path.exists()
+            and not task["overwrite"]
+            and _existing_manifest_matches_task(manifest_path, task)
+        ):
             return {
                 "status": "skipped",
                 "sweep_parameter": task["sweep_parameter"],

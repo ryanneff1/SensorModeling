@@ -43,6 +43,35 @@ def _merged(base: dict, override: dict | None) -> dict:
     return result
 
 
+def _resolve_assay_settings(
+    base: dict,
+    override: dict | None,
+    *,
+    k_off_s: float,
+) -> dict:
+    """Merge assay settings and resolve factor-based censoring.
+
+    ``max_time_factor_over_k_off`` expresses the observation horizon in
+    intrinsic dissociation lifetimes.  It deliberately takes precedence over
+    an inherited absolute ``max_time_s`` so condition-specific kinetic sweeps
+    remain comparable when ``k_off_s`` changes.
+    """
+
+    settings = _merged(base, override)
+    factor = settings.pop("max_time_factor_over_k_off", None)
+    if factor is not None:
+        factor = float(factor)
+        k_off_s = float(k_off_s)
+        if not np.isfinite(factor) or factor <= 0:
+            raise ValueError("max_time_factor_over_k_off must be positive.")
+        if not np.isfinite(k_off_s) or k_off_s <= 0:
+            raise ValueError(
+                "Factor-based censoring requires a positive finite k_off_s."
+            )
+        settings["max_time_s"] = factor / k_off_s
+    return validate_assay_settings(settings)
+
+
 def _normalize_geometry(condition: dict) -> dict:
     geometry = dict(condition.get("geometry", {}))
     if condition.get("geometry_type") == "cylindrically_curved_sheet":
@@ -353,8 +382,10 @@ def main() -> None:
             if tuple_field in overrides:
                 overrides[tuple_field] = tuple(overrides[tuple_field])
         params = replace(base_params, **overrides)
-        assay = validate_assay_settings(
-            _merged(base_assay, condition.get("assay_overrides", {}))
+        assay = _resolve_assay_settings(
+            base_assay,
+            condition.get("assay_overrides", {}),
+            k_off_s=params.k_off_s,
         )
         geometry_type = str(condition["geometry_type"])
         geometry = _normalize_geometry(condition)

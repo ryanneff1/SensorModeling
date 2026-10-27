@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=b53010
 #SBATCH --partition=buyin
-#SBATCH --time=12:00:00
+#SBATCH --time=48:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=30
 #SBATCH --mem-per-cpu=2G
@@ -14,6 +14,8 @@
 # Total tasks: 31 amplitudes (0-30 nm in 1 nm increments)
 #              x 3 receptor densities x 3 occupancy states
 #              x 8 replicates = 2,232.
+# Censoring horizon: 1e6 / k_off = 1e8 s at k_off = 1e-2 s^-1.
+# Existing 10,000 s manifests are detected as stale and recomputed.
 set -euo pipefail
 PROJECT_DIR="/home/rnt2664/SensorModeling"
 CONDA_ENV="sensor-modeling-env"
