@@ -3,6 +3,7 @@
   "sweep_parameter": "background_occupancy_fraction",
   "n_replicates": 8,
   "export": {
+    "include_trajectories": true,
     "include_survival": false,
     "compact_trajectories": true
   },

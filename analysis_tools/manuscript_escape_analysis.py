@@ -141,6 +141,41 @@ def summarize_replicates(
     rows = []
     for run in run_index.to_dict("records"):
         trajectory_path = Path(run["run_directory"]) / "trajectories.csv.gz"
+        replicate_summary_path = (
+            Path(run["run_directory"]) / "replicate_summary.csv"
+        )
+        if not trajectory_path.exists() and replicate_summary_path.exists():
+            try:
+                stored = pd.read_csv(replicate_summary_path)
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    _cloud_timeout_message(replicate_summary_path)
+                ) from exc
+            if len(stored) != 1:
+                raise ValueError(
+                    f"Expected one row in {replicate_summary_path}; "
+                    f"found {len(stored)}."
+                )
+            summary = dict(run)
+            summary.update(stored.iloc[0].to_dict())
+            mean_bound = float(summary["mean_bound_time_s"])
+            summary["KD_apparent_M"] = (
+                1.0 / (summary["k_on_M_inv_s"] * mean_bound)
+                if summary["k_on_M_inv_s"] > 0 and mean_bound > 0
+                else np.nan
+            )
+            summary["affinity_shift_fold"] = (
+                summary["KD_classical_M"] / summary["KD_apparent_M"]
+                if summary["KD_apparent_M"] > 0
+                else np.nan
+            )
+            rows.append(summary)
+            continue
+        if not trajectory_path.exists():
+            raise FileNotFoundError(
+                f"Neither trajectories.csv.gz nor replicate_summary.csv "
+                f"exists in {run['run_directory']}."
+            )
         required_columns = [
             "escaped",
             "censored",

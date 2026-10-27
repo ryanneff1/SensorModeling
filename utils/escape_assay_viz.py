@@ -60,6 +60,7 @@ def export_escape_assay_run(
     *,
     receptor_summary: Optional[pd.DataFrame] = None,
     run_metadata: Optional[dict] = None,
+    include_trajectories: bool = False,
     include_survival: bool = True,
     compact_trajectories: bool = False,
 ) -> Path:
@@ -76,18 +77,22 @@ def export_escape_assay_run(
     if receptor_summary is None:
         receptor_summary = summarize_receptor_trajectories(result)
 
-    trajectories = result.trajectories
-    if compact_trajectories:
-        compact_columns = [
-            "location_id", "trial_id", "escaped", "censored",
-            "escape_time_s", "observation_time_s", "n_rebindings",
-            "n_self_rebindings", "n_cross_rebindings",
-            "total_bound_time_s", "background_occupancy_fraction",
-        ]
-        trajectories = trajectories[
-            [column for column in compact_columns if column in trajectories.columns]
-        ]
-    trajectories.to_csv(directory / "trajectories.csv.gz", index=False)
+    trajectory_path = directory / "trajectories.csv.gz"
+    if include_trajectories:
+        trajectories = result.trajectories
+        if compact_trajectories:
+            compact_columns = [
+                "location_id", "trial_id", "escaped", "censored",
+                "escape_time_s", "observation_time_s", "n_rebindings",
+                "n_self_rebindings", "n_cross_rebindings",
+                "total_bound_time_s", "background_occupancy_fraction",
+            ]
+            trajectories = trajectories[
+                [column for column in compact_columns if column in trajectories.columns]
+            ]
+        trajectories.to_csv(trajectory_path, index=False)
+    replicate_summary = summarize_escape_assay_result(result)
+    replicate_summary.to_csv(directory / "replicate_summary.csv", index=False)
     if include_survival:
         result.survival.to_csv(directory / "survival.csv.gz", index=False)
     result.releases.to_csv(directory / "release_locations.csv", index=False)
@@ -118,19 +123,29 @@ def export_escape_assay_run(
         "n_receptors": int(len(result.receptors)),
         "files": {
             "geometry": "geometry.npz",
-            "trajectories": "trajectories.csv.gz",
+            "replicate_summary": "replicate_summary.csv",
             "releases": "release_locations.csv",
             "receptors": "receptors.csv",
             "receptor_summary": "receptor_summary.csv",
         },
     }
+    if include_trajectories:
+        metadata["files"]["trajectories"] = "trajectories.csv.gz"
     if include_survival:
         metadata["files"]["survival"] = "survival.csv.gz"
     metadata["compact_trajectories"] = bool(compact_trajectories)
+    metadata["include_trajectories"] = bool(include_trajectories)
     if run_metadata is not None:
         metadata["run_metadata"] = dict(run_metadata)
     with (directory / "manifest.json").open("w", encoding="utf-8") as stream:
         json.dump(_json_safe(metadata), stream, indent=2, sort_keys=True, allow_nan=False)
+    # Clean optional files from a stale bundle only after the complete
+    # replacement bundle and its manifest have been written successfully.
+    if not include_trajectories and trajectory_path.exists():
+        trajectory_path.unlink()
+    survival_path = directory / "survival.csv.gz"
+    if not include_survival and survival_path.exists():
+        survival_path.unlink()
     return directory
 
 
@@ -175,7 +190,11 @@ def load_escape_assay_run(input_directory) -> EscapeAssayArchive:
         directory=directory,
         params=params,
         geometry=geometry,
-        trajectories=pd.read_csv(directory / files["trajectories"]),
+        trajectories=(
+            pd.read_csv(directory / files["trajectories"])
+            if files.get("trajectories") is not None
+            else pd.DataFrame()
+        ),
         survival=(
             pd.read_csv(directory / files["survival"])
             if files.get("survival") is not None
@@ -198,18 +217,30 @@ def summarize_receptor_trajectories(
         .agg(
             n_trials=("trial_id", "size"),
             n_escaped=("escaped", "sum"),
+            n_censored=("censored", "sum"),
             escape_probability=("escaped", "mean"),
+            total_observation_time_s=("observation_time_s", "sum"),
             median_observation_time_s=("observation_time_s", "median"),
             mean_observation_time_s=("observation_time_s", "mean"),
             median_escape_time_s=("escape_time_s", "median"),
+            total_rebindings=("n_rebindings", "sum"),
             median_rebindings=("n_rebindings", "median"),
             mean_rebindings=("n_rebindings", "mean"),
+            n_any_rebinding=(
+                "n_rebindings",
+                lambda values: int(np.count_nonzero(values.to_numpy() > 0)),
+            ),
             probability_any_rebinding=(
                 "n_rebindings",
                 lambda values: float(np.mean(values.to_numpy() > 0)),
             ),
+            total_self_rebindings=("n_self_rebindings", "sum"),
+            total_cross_rebindings=("n_cross_rebindings", "sum"),
+            mean_self_rebindings=("n_self_rebindings", "mean"),
+            mean_cross_rebindings=("n_cross_rebindings", "mean"),
             median_self_rebindings=("n_self_rebindings", "median"),
             median_cross_rebindings=("n_cross_rebindings", "median"),
+            total_bound_time_s=("total_bound_time_s", "sum"),
             mean_bound_time_s=("total_bound_time_s", "mean"),
         )
         .reset_index()
@@ -239,6 +270,62 @@ def summarize_receptor_trajectories(
         on="source_face_id",
         how="left",
         validate="one_to_one",
+    )
+
+
+def summarize_escape_assay_result(result: EscapeAssayResult) -> pd.DataFrame:
+    """Return one exact aggregate row without retaining raw trajectories."""
+
+    trajectories = result.trajectories
+    free_time = (
+        trajectories["observation_time_s"]
+        - trajectories["total_bound_time_s"]
+    ).clip(lower=0)
+    self_total = float(trajectories["n_self_rebindings"].sum())
+    cross_total = float(trajectories["n_cross_rebindings"].sum())
+    total_rebindings = self_total + cross_total
+    return pd.DataFrame(
+        [{
+            "n_trajectories": int(len(trajectories)),
+            "n_escaped": int(trajectories["escaped"].sum()),
+            "n_censored": int(trajectories["censored"].sum()),
+            "escape_probability": float(trajectories["escaped"].mean()),
+            "censoring_fraction": float(trajectories["censored"].mean()),
+            "rmst_s": float(trajectories["observation_time_s"].mean()),
+            "median_observation_time_s": float(
+                trajectories["observation_time_s"].median()
+            ),
+            "total_bound_time_s": float(
+                trajectories["total_bound_time_s"].sum()
+            ),
+            "mean_bound_time_s": float(
+                trajectories["total_bound_time_s"].mean()
+            ),
+            "median_bound_time_s": float(
+                trajectories["total_bound_time_s"].median()
+            ),
+            "total_rebindings": float(trajectories["n_rebindings"].sum()),
+            "mean_rebindings": float(trajectories["n_rebindings"].mean()),
+            "median_rebindings": float(trajectories["n_rebindings"].median()),
+            "n_any_rebinding": int(
+                np.count_nonzero(trajectories["n_rebindings"].to_numpy() > 0)
+            ),
+            "probability_any_rebinding": float(
+                (trajectories["n_rebindings"] > 0).mean()
+            ),
+            "mean_free_time_s": float(free_time.mean()),
+            "total_self_rebindings": self_total,
+            "total_cross_rebindings": cross_total,
+            "mean_self_rebindings": float(
+                trajectories["n_self_rebindings"].mean()
+            ),
+            "mean_cross_rebindings": float(
+                trajectories["n_cross_rebindings"].mean()
+            ),
+            "cross_rebinding_fraction": (
+                cross_total / total_rebindings if total_rebindings > 0 else 0.0
+            ),
+        }]
     )
 
 
@@ -630,5 +717,6 @@ __all__ = [
     "plot_surface_metric_from_folder",
     "plot_surface_metric_3d",
     "plot_surface_metric_xy",
+    "summarize_escape_assay_result",
     "summarize_receptor_trajectories",
 ]

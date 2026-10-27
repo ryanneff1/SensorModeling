@@ -4,6 +4,7 @@
   "n_replicates": 8,
 
   "export": {
+    "include_trajectories": false,
     "include_survival": false,
     "compact_trajectories": true
   },

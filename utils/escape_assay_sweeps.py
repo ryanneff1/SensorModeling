@@ -35,6 +35,7 @@ def _existing_manifest_matches_task(manifest_path: Path, task: dict) -> bool:
             (run_metadata.get("assay"), task.get("assay")),
             (run_metadata.get("receptor_seed"), task.get("receptor_seed")),
             (run_metadata.get("trajectory_seed"), task.get("trajectory_seed")),
+            (run_metadata.get("export", {}), task.get("export", {})),
         )
         # JSON round-tripping normalizes tuples from dataclass fields to the
         # lists stored in manifests.
@@ -301,6 +302,7 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             "trajectory_seed": int(task["trajectory_seed"]),
             "geometry": task["geometry"],
             "assay": assay,
+            "export": task.get("export", {}),
         }
         if task.get("condition_metadata") is not None:
             metadata["condition"] = task["condition_metadata"]
@@ -309,6 +311,9 @@ def run_escape_sweep_task(task: Dict[str, Any]) -> Dict[str, Any]:
             run_directory,
             receptor_summary=receptor_summary,
             run_metadata=metadata,
+            include_trajectories=bool(
+                task.get("export", {}).get("include_trajectories", False)
+            ),
             include_survival=bool(task.get("export", {}).get("include_survival", True)),
             compact_trajectories=bool(
                 task.get("export", {}).get("compact_trajectories", False)
