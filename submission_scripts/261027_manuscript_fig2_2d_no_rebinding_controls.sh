@@ -2,9 +2,9 @@
 #SBATCH --account=b53010
 #SBATCH --partition=buyin
 #SBATCH --job-name=fig2_2d_ctrl
-#SBATCH --time=24:00:00
+#SBATCH --time=01:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=30
+#SBATCH --ntasks=16
 #SBATCH --mem-per-cpu=2G
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
@@ -12,13 +12,13 @@
 #SBATCH --mail-user=ryan.neff@northwestern.edu
 
 # 4 corner conditions x 8 replicates = 32 total tasks.
-# With 30 workers, the allocation completes in approximately 2 task rounds.
+# With 16 workers, the allocation completes in approximately 2 task rounds.
 
 set -euo pipefail
 
 PROJECT_DIR=/home/rnt2664/SensorModeling
 CONDA_ENV=sensor-modeling-env
-N_WORKERS=30
+N_WORKERS=16
 OUTPUT_NAME=261027_manuscript_fig2_2d_no_rebinding_controls
 
 unset PYTHONPATH PYTHONHOME
